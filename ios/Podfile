@@ -1,0 +1,63 @@
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+platform :ios, min_ios_version_supported
+prepare_react_native_project!
+
+linkage = ENV['USE_FRAMEWORKS']
+if linkage != nil
+  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+  use_frameworks! :linkage => linkage.to_sym
+end
+
+target 'MobillDrivers' do
+  config = use_native_modules!
+
+  # Add MobillDriversProtocol as local pod
+  pod 'MobillDriversProtocol', :path => './MobillDriversProtocol'
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  post_install do |installer|
+    # https://github.com/facebook/react-native/blob/main/packages/react-native/scripts/react_native_pods.rb#L197-L202
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+
+    # Add codegen script phase to ensure generated files exist before build
+    app_project = installer.aggregate_targets.find { |target| target.name == 'MobillDrivers' }&.user_project
+    if app_project
+      app_project.targets.each do |target|
+        if target.name == 'MobillDrivers'
+          # Check if the script phase already exists
+          existing_phase = target.shell_script_build_phases.find { |phase| phase.name == 'Generate React Native Codegen' }
+
+          unless existing_phase
+            # Add script phase to run codegen before compilation
+            script_phase = target.new_shell_script_build_phase('Generate React Native Codegen')
+            script_phase.shell_script = "bash \"${SRCROOT}/../scripts/codegen.sh\""
+            script_phase.run_only_for_deployment_postprocessing = false
+            script_phase.show_env_vars_in_log = true
+
+            # Move the script phase to run before source compilation
+            target.build_phases.move(script_phase, 0)
+
+            puts "✅ Added React Native Codegen script phase to #{target.name}"
+            app_project.save
+          end
+        end
+      end
+    end
+  end
+end
