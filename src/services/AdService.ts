@@ -1,5 +1,6 @@
 import AuthService from './AuthService';
 import BackgroundLocationService, { type Coordinates } from './BackgroundLocationService';
+import AppVersionService from './AppVersionService';
 import { AppState, AppStateStatus } from 'react-native';
 import BackgroundTimer from 'react-native-background-timer';
 // Lazy load NotificationService to prevent early permission requests
@@ -36,12 +37,25 @@ export interface AdContent {
   textColor?: string;
 }
 
+export interface BLEDevice {
+  id: string;
+  name: string;
+  rssi: number;
+}
+
+export interface BLEScanResult {
+  devices: BLEDevice[];
+  timestamp: number;
+}
+
 export interface AdResponse {
   ad_id: string;
   campaign_id: string;
   display_duration: number;
   driver_earnings: DriverEarnings;
   content: AdContent;
+  is_stationary?: boolean; // True when car is not moving
+  is_default?: boolean; // True when server sends default ad (no ads available for location)
 }
 
 class AdServiceClass {
@@ -51,6 +65,9 @@ class AdServiceClass {
   private onEarningsUpdated?: (earnings: DriverEarnings) => void;
   private appStateSubscription: any = null;
 
+  // BLE rolling window (keeps last 2 scans = 50 seconds)
+  private bleScanHistory: BLEScanResult[] = [];
+
   async fetchAd(coordinates?: Coordinates): Promise<AdResponse | null> {
     try {
       const accessToken = await AuthService.getValidAccessToken();
@@ -59,6 +76,7 @@ class AdServiceClass {
         return null;
       }
 
+      // Build URL with coordinates as query params (as before)
       let url = `${API_BASE_URL}/api/v1/core/serve-ad`;
 
       if (coordinates) {
@@ -69,21 +87,41 @@ class AdServiceClass {
         url += `?${params.toString()}`;
       }
 
-      console.log('🌐 SERVE-AD API CALL:');
+      // Build request body with BLE data only
+      const requestBody: any = {};
+      const bleData = this.getBLEDataForAPI();
+
+      if (bleData.ble_devices.length > 0 || bleData.unknown_count > 0) {
+        requestBody.ble_devices = bleData.ble_devices;
+        requestBody.unknown_count = bleData.unknown_count;
+      }
+
+      // Get app version headers
+      const versionHeaders = await AppVersionService.getVersionHeaders();
+
+      console.log('🌐 SERVE-AD API CALL (POST):');
       console.log(`📍 URL: ${url}`);
       console.log(`🔑 Authorization: Bearer ${accessToken.substring(0, 20)}...`);
+      console.log(`📱 App: ${versionHeaders['X-App-Version']} (${versionHeaders['X-App-Platform']}) build ${versionHeaders['X-App-Build']}`);
       if (coordinates) {
         console.log(`📍 Coordinates: lat=${coordinates.latitude}, lng=${coordinates.longitude}`);
       } else {
         console.log('📍 No coordinates provided');
       }
+      if (bleData.ble_devices.length > 0 || bleData.unknown_count > 0) {
+        console.log(`📡 BLE Data: ${bleData.ble_devices.length} devices, ${bleData.unknown_count} unknown`);
+      } else {
+        console.log('📡 No BLE data available');
+      }
 
       const response = await fetch(url, {
-        method: 'GET',
+        method: 'POST',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
+          ...versionHeaders,
         },
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -96,6 +134,74 @@ class AdServiceClass {
       console.error('Error fetching ad:', error);
       return null;
     }
+  }
+
+  /**
+   * Add BLE scan results to rolling window (keeps last 2 scans)
+   */
+  addBLEScanResults(scanResult: BLEScanResult): void {
+    this.bleScanHistory.push(scanResult);
+
+    // Keep only last 2 scans (50 second window)
+    if (this.bleScanHistory.length > 2) {
+      this.bleScanHistory.shift();
+    }
+
+    console.log(`📡 BLE scan added: ${scanResult.devices.length} devices, window has ${this.bleScanHistory.length} scans`);
+  }
+
+  /**
+   * Get aggregated BLE devices from rolling window (deduplicated by UUID)
+   */
+  private getAggregatedBLEDevices(): BLEDevice[] {
+    const deviceMap = new Map<string, BLEDevice>();
+
+    // Process all scans in history (newest to oldest for latest RSSI)
+    for (let i = this.bleScanHistory.length - 1; i >= 0; i--) {
+      const scan = this.bleScanHistory[i];
+      for (const device of scan.devices) {
+        // Only keep first occurrence (newest RSSI) for each UUID
+        if (!deviceMap.has(device.id)) {
+          deviceMap.set(device.id, device);
+        }
+      }
+    }
+
+    return Array.from(deviceMap.values());
+  }
+
+  /**
+   * Get BLE data formatted for API
+   */
+  private getBLEDataForAPI(): { ble_devices: Array<{name: string, rssi: number}>, unknown_count: number } {
+    const devices = this.getAggregatedBLEDevices();
+
+    const bleDevices: Array<{name: string, rssi: number}> = [];
+    let unknownCount = 0;
+
+    for (const device of devices) {
+      if (device.name && device.name !== 'Unknown Device') {
+        bleDevices.push({
+          name: device.name,
+          rssi: device.rssi
+        });
+      } else {
+        unknownCount++;
+      }
+    }
+
+    return {
+      ble_devices: bleDevices,
+      unknown_count: unknownCount
+    };
+  }
+
+  /**
+   * Clear BLE rolling window
+   */
+  clearBLEHistory(): void {
+    this.bleScanHistory = [];
+    console.log('📡 BLE scan history cleared');
   }
 
   startAdServing(
@@ -199,6 +305,9 @@ class AdServiceClass {
     this.onAdReceived = undefined;
     this.onEarningsUpdated = undefined;
 
+    // Clear BLE history when stopping ad serving
+    this.clearBLEHistory();
+
     // Reset notification counter when stopping ad serving
     try {
       const notificationService = await loadNotificationService();
@@ -221,7 +330,7 @@ class AdServiceClass {
       } else if (nextAppState === 'active') {
         console.log('App became active - ad serving continues');
         // Fetch an ad immediately when returning to foreground
-        this.fetchAndProcessAd();
+        //this.fetchAndProcessAd();
       }
     }
   }

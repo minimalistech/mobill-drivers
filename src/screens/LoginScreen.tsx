@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import AuthService from '../services/AuthService';
+import AppVersionService from '../services/AppVersionService';
 
 interface LoginScreenProps {
   onLoginSuccess: () => void;
@@ -21,6 +22,16 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
+
+  useEffect(() => {
+    const loadVersionInfo = async () => {
+      const headers = await AppVersionService.getVersionHeaders();
+      const versionString = `Version ${headers['X-App-Version']} (${headers['X-App-Build']}) • ${headers['X-App-Platform']}`;
+      setAppVersion(versionString);
+    };
+    loadVersionInfo();
+  }, []);
 
   const handleLogin = async () => {
     if (!email.trim() || !password.trim()) {
@@ -125,6 +136,13 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
         >
           <Text style={styles.forgotPasswordText}>Forgot password</Text>
         </TouchableOpacity>
+
+        {/* Version Display */}
+        {appVersion ? (
+          <View style={styles.versionContainer}>
+            <Text style={styles.versionText}>{appVersion}</Text>
+          </View>
+        ) : null}
       </View>
     </SafeAreaView>
   );
@@ -202,6 +220,17 @@ const styles = StyleSheet.create({
   forgotPasswordText: {
     color: '#1B46F5',
     fontSize: 16,
+  },
+  versionContainer: {
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    marginTop: 30,
+  },
+  versionText: {
+    color: '#999999',
+    fontSize: 12,
+    textAlign: 'center',
   },
 });
 

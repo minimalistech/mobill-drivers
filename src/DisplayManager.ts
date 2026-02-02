@@ -31,7 +31,7 @@ interface DisplayManagerInterface {
 
   // Content Display
   displayContent(config: DisplayContentConfig): Promise<boolean>;
-  displayTestAnimation(displaySize: { width: number; height: number }, mode: number, speed: number, stayTime: number): Promise<boolean>;
+  //displayTestAnimation(displaySize: { width: number; height: number }, mode: number, speed: number, stayTime: number): Promise<boolean>;
 
   // Data Transmission
   sendGraffitiData(pixelData: number[][][], width: number, height: number): Promise<boolean>;
@@ -40,9 +40,13 @@ interface DisplayManagerInterface {
   compressData(data: number[]): Promise<number[]>;
   calculateChecksum(data: number[]): Promise<number>;
 
+  // Continuous BLE Scanning for Impression Tracking
+  startContinuousBLEScanning(): Promise<boolean>;
+  stopContinuousBLEScanning(): Promise<boolean>;
+
   // Ultra-Aggressive Location Tracking for Car Advertising
-  startUltraLocationTracking(): Promise<boolean>;
-  stopUltraLocationTracking(): Promise<boolean>;
+  //startUltraLocationTracking(): Promise<boolean>;
+  //stopUltraLocationTracking(): Promise<boolean>;
 }
 
 interface BluetoothDevice {
@@ -85,11 +89,17 @@ interface DataReceivedEvent {
   data: number[];
 }
 
-type DisplayManagerEventType = 
+interface BLEScanResultsEvent {
+  devices: BluetoothDevice[];
+  timestamp: number;
+}
+
+type DisplayManagerEventType =
   | 'onDeviceDiscovered'
-  | 'onDeviceConnected' 
+  | 'onDeviceConnected'
   | 'onDeviceDisconnected'
-  | 'onDataReceived';
+  | 'onDataReceived'
+  | 'onBLEScanResults';
 
 class DisplayManagerAPI {
   private nativeModule: DisplayManagerInterface | null = null;
@@ -113,7 +123,7 @@ class DisplayManagerAPI {
       console.log('🔧 DisplayManager native module initialized');
     }
   }
-  
+
   /**
    * Check the current Bluetooth state
    * @returns Object with enabled boolean and state number
@@ -139,7 +149,7 @@ class DisplayManagerAPI {
     this.ensureInitialized();
     return this.nativeModule!.stopScan();
   }
-  
+
   /**
    * Connect to a specific CoolLEDU device
    * @param deviceId Device identifier from discovery
@@ -148,7 +158,7 @@ class DisplayManagerAPI {
     this.ensureInitialized();
     return this.nativeModule!.connectToDevice(deviceId);
   }
-  
+
   /**
    * Disconnect from a CoolLEDU device
    * @param deviceId Device identifier
@@ -214,6 +224,7 @@ class DisplayManagerAPI {
    * @param speed Animation speed (1-255, higher = faster)
    * @param stayTime Frame duration in deciseconds (1/10 second)
    */
+   /*
   async displayTestAnimation(
     displaySize: { width: number; height: number },
     mode: number = 1,
@@ -239,11 +250,12 @@ class DisplayManagerAPI {
     this.ensureInitialized();
     return this.nativeModule!.displayTestAnimation(displaySize, mode, speed, stayTime);
   }
+  */
   
   /**
    * Send graffiti (image) data to connected display
    * Uses manufacturer's protocol with LZSS compression and CRC32 validation
-   * 
+   *
    * @param pixelData Array of column-major pixel data: [[[r,g,b],...],[[r,g,b],...],...]
    * @param width Display width (e.g., 96 for CoolLEDU 96x16)
    * @param height Display height (e.g., 16 for CoolLEDU 96x16)
@@ -252,19 +264,19 @@ class DisplayManagerAPI {
     if (!pixelData || pixelData.length === 0) {
       throw new Error('Pixel data cannot be empty');
     }
-    
+
     if (width <= 0 || height <= 0) {
       throw new Error('Width and height must be positive numbers');
     }
-    
+
     this.ensureInitialized();
     return this.nativeModule!.sendGraffitiData(pixelData, width, height);
   }
-  
+
   /**
    * Compress data using LZSS algorithm
    * Uses same parameters as manufacturer's implementation (N=512, F=18)
-   * 
+   *
    * @param data Raw data bytes to compress
    * @returns Compressed data bytes
    */
@@ -272,15 +284,15 @@ class DisplayManagerAPI {
     if (!data || data.length === 0) {
       throw new Error('Data to compress cannot be empty');
     }
-    
+
     this.ensureInitialized();
     return this.nativeModule!.compressData(data);
   }
-  
+
   /**
    * Calculate CRC32 checksum using STM32 hardware format
    * Compatible with manufacturer's checksum validation
-   * 
+   *
    * @param data Data bytes to checksum
    * @returns CRC32 checksum value
    */
@@ -288,11 +300,28 @@ class DisplayManagerAPI {
     if (!data || data.length === 0) {
       throw new Error('Data to checksum cannot be empty');
     }
-    
+
     this.ensureInitialized();
     return this.nativeModule!.calculateChecksum(data);
   }
-  
+
+  /**
+   * Start continuous BLE scanning for impression tracking
+   * Scans continuously in 25-second cycles, emitting results via onBLEScanResults
+   */
+  async startContinuousBLEScanning(): Promise<boolean> {
+    this.ensureInitialized();
+    return this.nativeModule!.startContinuousBLEScanning();
+  }
+
+  /**
+   * Stop continuous BLE scanning
+   */
+  async stopContinuousBLEScanning(): Promise<boolean> {
+    this.ensureInitialized();
+    return this.nativeModule!.stopContinuousBLEScanning();
+  }
+
   /**
    * Subscribe to device discovery events
    * @param callback Function called when devices are discovered
@@ -301,7 +330,7 @@ class DisplayManagerAPI {
     this.ensureInitialized();
     return this.eventEmitter!.addListener('onDeviceDiscovered', callback);
   }
-  
+
   /**
    * Subscribe to device connection events
    * @param callback Function called when device connects
@@ -310,7 +339,7 @@ class DisplayManagerAPI {
     this.ensureInitialized();
     return this.eventEmitter!.addListener('onDeviceConnected', callback);
   }
-  
+
   /**
    * Subscribe to device disconnection events
    * @param callback Function called when device disconnects
@@ -319,7 +348,7 @@ class DisplayManagerAPI {
     this.ensureInitialized();
     return this.eventEmitter!.addListener('onDeviceDisconnected', callback);
   }
-  
+
   /**
    * Subscribe to data received events
    * @param callback Function called when data is received from device
@@ -328,13 +357,22 @@ class DisplayManagerAPI {
     this.ensureInitialized();
     return this.eventEmitter!.addListener('onDataReceived', callback);
   }
-  
+
+  /**
+   * Subscribe to BLE scan results events
+   * @param callback Function called when BLE scan cycle completes with results
+   */
+  onBLEScanResults(callback: (event: BLEScanResultsEvent) => void): EmitterSubscription {
+    this.ensureInitialized();
+    return this.eventEmitter!.addListener('onBLEScanResults', callback);
+  }
+
   /**
    * Create a simple test pattern for CoolLEDU 96x16 display
    * Returns pixel data for a basic pattern to verify display communication
-   * 
+   *
    * @param width Display width (default: 96)
-   * @param height Display height (default: 16)  
+   * @param height Display height (default: 16)
    * @returns Pixel data array with test pattern
    */
   createTestPattern(width: number = 96, height: number = 16): number[][][] {
@@ -342,30 +380,30 @@ class DisplayManagerAPI {
     // Structure: [[col1_pixels], [col2_pixels], ..., [col96_pixels]]
     // Each column: [[r,g,b], [r,g,b], ..., [r,g,b]] (16 pixels)
     // RGB values: 0.0-1.0 floats
-    
+
     const pixelData: number[][][] = [];
-    
+
     // Process column by column (96 columns)
     for (let x = 0; x < width; x++) {
       const columnPixels: number[][] = [];
-      
+
       // Process each row in this column (16 rows)
       for (let y = 0; y < height; y++) {
         let r: number, g: number, b: number;
-        
+
         // VERSION 2.67: Try simple all-white pattern for maximum visibility
         r = 1.0; g = 1.0; b = 1.0;  // Bright white - should be extremely visible
-        
+
         columnPixels.push([r, g, b]);
       }
-      
+
       pixelData.push(columnPixels);
     }
-    
+
     console.log('VERSION 2.67: Created bright white pattern:', pixelData.length, 'columns ×', pixelData[0].length, 'rows, format: [[[r,g,b]]]');
     return pixelData;
   }
-  
+
   /**
    * Convert HSV color to RGB
    * @param h Hue (0-360)
@@ -377,9 +415,9 @@ class DisplayManagerAPI {
     const c = v * s;
     const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
     const m = v - c;
-    
+
     let r = 0, g = 0, b = 0;
-    
+
     if (h >= 0 && h < 60) {
       r = c; g = x; b = 0;
     } else if (h >= 60 && h < 120) {
@@ -393,30 +431,30 @@ class DisplayManagerAPI {
     } else if (h >= 300 && h < 360) {
       r = c; g = 0; b = x;
     }
-    
+
     return {
       r: Math.round((r + m) * 255),
       g: Math.round((g + m) * 255),
       b: Math.round((b + m) * 255)
     };
   }
-  
+
   /**
    * Convert RGB color to RGB444 format used by CoolLEDU displays
    * @param r Red component (0-255)
-   * @param g Green component (0-255)  
+   * @param g Green component (0-255)
    * @param b Blue component (0-255)
    * @returns RGB444 value (12-bit color)
    */
   static rgbToRgb444(r: number, g: number, b: number): number {
     // Convert 8-bit to 4-bit per channel
     const r4 = Math.floor((r / 255) * 15);
-    const g4 = Math.floor((g / 255) * 15);  
+    const g4 = Math.floor((g / 255) * 15);
     const b4 = Math.floor((b / 255) * 15);
-    
+
     return (r4 << 8) | (g4 << 4) | b4;
   }
-  
+
   /**
    * Convert RGB444 to RGB color
    * @param rgb444 RGB444 value (12-bit color)
@@ -426,7 +464,7 @@ class DisplayManagerAPI {
     const r4 = (rgb444 >> 8) & 0xF;
     const g4 = (rgb444 >> 4) & 0xF;
     const b4 = rgb444 & 0xF;
-    
+
     return {
       r: Math.floor((r4 / 15) * 255),
       g: Math.floor((g4 / 15) * 255),
@@ -446,6 +484,7 @@ export type {
   DeviceConnectedEvent,
   DeviceDisconnectedEvent,
   DataReceivedEvent,
+  BLEScanResultsEvent,
   DisplayManagerEventType,
   DisplayContentConfig
 };

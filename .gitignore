@@ -26,6 +26,7 @@ DerivedData
 build/
 .idea
 .gradle
+.cxx/
 local.properties
 *.iml
 
@@ -58,3 +59,7 @@ buck-out/
 # CocoaPods
 /ios/Pods/
 
+# Output and log files
+output
+output-*
+*.log

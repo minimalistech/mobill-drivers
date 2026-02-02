@@ -21,10 +21,36 @@ export interface TokenRefreshResponse {
 class AuthServiceClass {
   private accessToken: string | null = null;
   private refreshToken: string | null = null;
+  private onAuthFailureCallback: (() => void) | null = null;
 
   async initialize(): Promise<void> {
     this.accessToken = await AsyncStorage.getItem(ACCESS_TOKEN_KEY);
     this.refreshToken = await AsyncStorage.getItem(REFRESH_TOKEN_KEY);
+  }
+
+  /**
+   * Register a callback to be called when authentication fails
+   * This allows the app to redirect to login screen
+   */
+  setAuthFailureCallback(callback: () => void): void {
+    this.onAuthFailureCallback = callback;
+  }
+
+  /**
+   * Clear the auth failure callback
+   */
+  clearAuthFailureCallback(): void {
+    this.onAuthFailureCallback = null;
+  }
+
+  /**
+   * Trigger the auth failure callback if registered
+   */
+  private triggerAuthFailure(): void {
+    if (this.onAuthFailureCallback) {
+      console.log('🔒 Authentication failed - triggering callback to redirect to login');
+      this.onAuthFailureCallback();
+    }
   }
 
   async login(credentials: LoginCredentials): Promise<boolean> {
@@ -87,6 +113,7 @@ class AuthServiceClass {
 
   async getValidAccessToken(): Promise<string | null> {
     if (!this.accessToken) {
+      this.triggerAuthFailure();
       return null;
     }
 
@@ -97,6 +124,7 @@ class AuthServiceClass {
       if (payload.exp && payload.exp < currentTime + 300) {
         const refreshed = await this.refreshAccessToken();
         if (!refreshed) {
+          this.triggerAuthFailure();
           return null;
         }
       }
@@ -104,6 +132,7 @@ class AuthServiceClass {
       return this.accessToken;
     } catch (error) {
       console.error('Error validating token:', error);
+      this.triggerAuthFailure();
       return null;
     }
   }

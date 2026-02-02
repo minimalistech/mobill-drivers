@@ -11,60 +11,66 @@ class BackgroundLocationServiceClass {
   private isTracking: boolean = false;
   private currentPosition: Coordinates | null = null;
 
+  private getConfig() {
+    return {
+      reset: false, // Don't reset state, preserving permissions
+      // Permission Config
+      locationAuthorizationRequest: 'Always', // Request "Always" permission for background tracking
+      // Geolocation Config
+      desiredAccuracy: BackgroundGeolocation.DESIRED_ACCURACY_HIGH,
+      distanceFilter: 1, // Update every 1 meter for car advertising precision
+
+      // Activity Recognition - disabled to avoid Motion & Fitness permission
+      disableMotionActivityUpdates: true, // Disable motion activity globally
+      disableStopDetection: true, // Disable stop detection completely
+
+      // Application config
+      debug: false, // Disable debug mode completely
+      logLevel: BackgroundGeolocation.LOG_LEVEL_OFF,
+      stopOnTerminate: true, // Continue tracking when app is terminated
+      startOnBoot: false, // Don't start on device boot
+      enableHeadless: false, // Don't enable headless mode
+
+      // HTTP / PERSISTANCE config
+      url: '', // We'll handle HTTP ourselves via AdService
+      autoSync: false, // We handle syncing manually
+
+      // Background Sync & Battery Saving
+      locationTimeout: 60, // Max time to wait for location
+      backgroundPermissionRationale: {
+        title: "Enable Background Location",
+        message: "For the best car advertising experience, Mobill needs location access even when your phone is locked. This ensures fresh, accurate ads while driving.",
+        positiveAction: 'Change to "Always"',
+        negativeAction: 'Keep "While Using App"'
+      },
+
+      // iOS-specific config for car advertising
+      ...Platform.select({
+        ios: {
+          preventSuspend: true, // Prevent app suspension for continuous tracking
+          heartbeatInterval: 60, // Keep alive signal every minute
+          showsBackgroundLocationIndicator: true, // Show blue bar (required for Always permission)
+          disableLocationAuthorizationAlert: false, // Allow permission prompts
+          disableMotionActivityUpdates: true, // Disable motion activity to prevent Motion & Fitness permission
+        },
+        android: {
+          locationUpdateInterval: 5000, // Update every 2 seconds on Android
+          fastestLocationUpdateInterval: 1000, // Fastest update interval
+        }
+      })
+    };
+  }
+
   async initialize(): Promise<void> {
+    if (true) return;
+
     if (this.isConfigured) return;
 
     try {
       console.log('🎯 Initializing Background Geolocation for car advertising...');
 
-      // Configure the plugin for maximum precision car advertising (without auto-requesting permissions)
-      await BackgroundGeolocation.ready({
-        reset: false, // Don't reset state, preserving permissions
-        // Geolocation Config
-        desiredAccuracy: BackgroundGeolocation.DESIRED_ACCURACY_HIGH,
-        distanceFilter: 1, // Update every 1 meter for car advertising precision
-
-        // Activity Recognition - disabled to avoid Motion & Fitness permission
-        stopTimeout: 0, // Disable stop detection to avoid Motion permission
-        disableMotionActivityUpdates: true, // Disable motion activity globally
-        disableStopDetection: true, // Disable stop detection completely
-
-        // Application config
-        debug: false, // Disable debug mode completely
-        logLevel: BackgroundGeolocation.LOG_LEVEL_OFF,
-        stopOnTerminate: false, // Continue tracking when app is terminated
-        startOnBoot: false, // Don't start on device boot
-        enableHeadless: false, // Don't enable headless mode
-
-        // HTTP / PERSISTANCE config
-        url: '', // We'll handle HTTP ourselves via AdService
-        autoSync: false, // We handle syncing manually
-
-        // Background Sync & Battery Saving
-        locationTimeout: 60, // Max time to wait for location
-        backgroundPermissionRationale: {
-          title: "Enable Background Location",
-          message: "For the best car advertising experience, Mobill needs location access even when your phone is locked. This ensures fresh, accurate ads while driving.",
-          positiveAction: 'Change to "Always"',
-          negativeAction: 'Keep "While Using App"'
-        },
-
-        // iOS-specific config for car advertising
-        ...Platform.select({
-          ios: {
-            preventSuspend: true, // Prevent app suspension for continuous tracking
-            heartbeatInterval: 60, // Keep alive signal every minute
-            showsBackgroundLocationIndicator: true, // Show blue bar (required for Always permission)
-            disableLocationAuthorizationAlert: false, // Allow permission prompts
-            disableMotionActivityUpdates: true, // Disable motion activity to prevent Motion & Fitness permission
-          },
-          android: {
-            locationUpdateInterval: 2000, // Update every 2 seconds on Android
-            fastestLocationUpdateInterval: 1000, // Fastest update interval
-            enableHeadless: true, // Continue in headless mode
-          }
-        })
-      });
+      // Configure the plugin for maximum precision car advertising
+      await BackgroundGeolocation.ready(this.getConfig());
 
       // Set up event listeners
       this.setupEventListeners();
@@ -135,46 +141,47 @@ class BackgroundLocationServiceClass {
     });
   }
 
-  async requestLocationPermission(): Promise<boolean> {
-    try {
-      if (!this.isConfigured) {
-        await this.initialize();
-      }
-
-      console.log('🎯 Requesting location permission for car advertising...');
-
-      // Request permission
-      const status = await BackgroundGeolocation.requestPermission();
-      console.log(`🎯 Permission result: ${status}`);
-
-      return status === BackgroundGeolocation.AUTHORIZATION_STATUS_ALWAYS ||
-             status === BackgroundGeolocation.AUTHORIZATION_STATUS_WHEN_IN_USE;
-
-    } catch (error) {
-      console.error('🚨 Error requesting location permission:', error);
-      return false;
-    }
-  }
-
   /**
    * Request location permissions from the user
    */
   async requestLocationPermissions(): Promise<boolean> {
     try {
-      if (!this.isConfigured) {
-        await this.initialize();
-      }
-
       console.log('🎯 Requesting location permissions...');
 
-      // Request permissions through the background geolocation service
-      const status = await BackgroundGeolocation.requestPermission();
+      // Call ready() BEFORE requestPermission() as per library developer's instructions
+      console.log('🎯 Calling ready() with locationAuthorizationRequest: Always...');
+      await BackgroundGeolocation.ready(this.getConfig());
 
-      if (status === BackgroundGeolocation.AUTHORIZATION_STATUS_ALWAYS) {
-        console.log('✅ Background location permission granted');
-        return true;
-      } else {
-        console.log('🚨 Background location permission denied or insufficient');
+      //if (!this.isConfigured) {
+      //  this.setupEventListeners();
+      //  this.isConfigured = true;
+      //}
+
+      // Check current permission status
+      //const providerState = await BackgroundGeolocation.getProviderState();
+      //console.log(`🎯 Current permission status: ${providerState.status}`);
+
+      //if (providerState.status === BackgroundGeolocation.AUTHORIZATION_STATUS_ALWAYS) {
+      //  console.log('✅ Already have ALWAYS permission');
+      //  return true;
+      //}
+
+      // Request permission - this will trigger the permission dialog
+      console.log('🎯 Calling requestPermission() to show permission dialog...');
+      try {
+        const status = await BackgroundGeolocation.requestPermission();
+        console.log('✅ requestPermission() success, status:', status);
+
+        if (status === BackgroundGeolocation.AUTHORIZATION_STATUS_ALWAYS) {
+          console.log('✅ Background location permission (ALWAYS) granted');
+          return true;
+        } else {
+          console.log('⚠️ Permission granted but not ALWAYS (got: ' + status + ')');
+          return false;
+        }
+      } catch (status) {
+        // requestPermission can reject if permission is denied
+        console.warn('🚨 requestPermission() rejected with status:', status);
         return false;
       }
     } catch (error) {
@@ -208,6 +215,7 @@ class BackgroundLocationServiceClass {
 
   async startLocationTracking(): Promise<boolean> {
     try {
+
       if (!this.isConfigured) {
         await this.initialize();
       }
@@ -226,8 +234,9 @@ class BackgroundLocationServiceClass {
       }
 
       // Only proceed if we have proper authorization
-      if (providerState.status !== BackgroundGeolocation.AUTHORIZATION_STATUS_ALWAYS) {
-        console.log('🚨 Background location permission not granted');
+      if (providerState.status !== BackgroundGeolocation.AUTHORIZATION_STATUS_ALWAYS &&
+          providerState.status !== BackgroundGeolocation.AUTHORIZATION_STATUS_WHEN_IN_USE) {
+        console.log('🚨 Location permission not granted');
         return false;
       }
 

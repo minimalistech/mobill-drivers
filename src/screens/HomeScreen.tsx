@@ -10,10 +10,17 @@ import {
   Alert,
   ActivityIndicator,
   Linking,
+  PermissionsAndroid,
+  Platform,
 } from 'react-native';
-import AdService, { type AdResponse, type AdContent, type DriverEarnings } from '../services/AdService';
+import AdService, { type AdResponse, type AdContent, type DriverEarnings, type BLEScanResult } from '../services/AdService';
 import BackgroundLocationService from '../services/BackgroundLocationService';
 import AuthService from '../services/AuthService';
+import AppVersionService from '../services/AppVersionService';
+import DisplayStatusAPI from '../services/DisplayStatusAPI';
+import DisplayMonitorService from '../services/DisplayMonitorService';
+import { validateStayTime, validateSpeed, validateMode } from '../utils/displayValidation';
+import DisplayStatusIndicator, { type DisplayStatus } from '../components/DisplayStatusIndicator';
 
 // Lazy load DisplayManager to prevent Bluetooth permissions on component mount
 let DisplayManager: any = null;
@@ -55,16 +62,49 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
     today: '--',
     this_month: '--',
   });
+  const [appVersion, setAppVersion] = useState('');
+  const [userInitiatedShutdown, setUserInitiatedShutdown] = useState(false);
+  const [disconnectionDuration, setDisconnectionDuration] = useState(0);
+  const [showDisconnectWarning, setShowDisconnectWarning] = useState(false);
+  const [displayStatus, setDisplayStatus] = useState<DisplayStatus>('displaying');
+  const userInitiatedShutdownRef = useRef<boolean>(false);
   const connectSubscriptionRef = useRef<any>(null);
   const disconnectSubscriptionRef = useRef<any>(null);
   const discoverySubscriptionRef = useRef<any>(null);
+  const bleSubscriptionRef = useRef<any>(null);
+  const isSendingToDisplayRef = useRef<boolean>(false);
 
   useEffect(() => {
+    // Load version information on mount
+    const loadVersionInfo = async () => {
+      const headers = await AppVersionService.getVersionHeaders();
+      const versionString = `Version ${headers['X-App-Version']} (${headers['X-App-Build']}) • ${headers['X-App-Platform']}`;
+      setAppVersion(versionString);
+    };
+    loadVersionInfo();
+
+    // Setup DisplayMonitorService status update callback
+    DisplayMonitorService.setStatusUpdateCallback((durationMinutes, showWarning) => {
+      setDisconnectionDuration(durationMinutes);
+      setShowDisconnectWarning(showWarning);
+    });
+
+    // Setup authentication failure callback
+    AuthService.setAuthFailureCallback(async () => {
+      console.log('🔒 Authentication failed - redirecting to login screen');
+      await AuthService.logout();
+      AdService.stopAdServing();
+      onLogout();
+    });
+
     // Don't setup DisplayManager event listeners on mount to avoid Bluetooth permissions
     // setupEventListeners();
     return () => {
       cleanupEventListeners();
       AdService.stopAdServing();
+      DisplayMonitorService.clearStatusUpdateCallback();
+      DisplayMonitorService.stopMonitoring();
+      AuthService.clearAuthFailureCallback();
     };
   }, []);
 
@@ -75,6 +115,25 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
         console.log('Device connected:', event);
         setIsDisplayConnected(true);
         setIsConnecting(false);
+
+        // Check if this is a reconnection after unintended disconnect
+        const wasMonitoring = DisplayMonitorService.isCurrentlyMonitoring();
+        if (wasMonitoring) {
+          const wasAutomatic = DisplayMonitorService.wasLastReconnectionAutomatic();
+          if (wasAutomatic) {
+            console.log('✅ Automatic reconnection successful! Device connected.');
+          } else {
+            console.log('📊 Manual reconnection successful.');
+          }
+          await DisplayStatusAPI.reportReconnected(wasAutomatic);
+          DisplayMonitorService.stopMonitoring();
+          setShowDisconnectWarning(false);
+          setDisconnectionDuration(0);
+        } else {
+          // This is a first-time connection (not a reconnection)
+          console.log('📊 First-time connection - reporting turned_on');
+          await DisplayStatusAPI.reportTurnedOn();
+        }
 
         // Turn on the display after successful connection
         try {
@@ -111,6 +170,28 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
           console.log('⚠️ Failed to start background location tracking');
         }
 
+        // Reset send flag when display connects (in case of app reload/crash)
+        isSendingToDisplayRef.current = false;
+
+        // Start continuous BLE scanning for impression tracking
+        console.log('📡 Starting continuous BLE scanning for impression tracking...');
+        try {
+          const bleScanStarted = await manager.startContinuousBLEScanning();
+          if (bleScanStarted) {
+            console.log('✅ Continuous BLE scanning started successfully');
+
+            // Subscribe to BLE scan results
+            bleSubscriptionRef.current = manager.onBLEScanResults((scanResult: BLEScanResult) => {
+              console.log(`📡 BLE scan results received: ${scanResult.devices.length} devices`);
+              AdService.addBLEScanResults(scanResult);
+            });
+          } else {
+            console.log('⚠️ Failed to start continuous BLE scanning');
+          }
+        } catch (error) {
+          console.error('Error starting BLE scanning:', error);
+        }
+
         startAdServing();
         console.log(`Successfully connected to ${event.name}`);
       }
@@ -125,15 +206,34 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
         console.log('🎯 Stopping background location tracking - display disconnected');
         await BackgroundLocationService.stopLocationTracking();
 
+        // Stop continuous BLE scanning
+        console.log('📡 Stopping continuous BLE scanning - display disconnected');
+        try {
+          await manager.stopContinuousBLEScanning();
+          if (bleSubscriptionRef.current) {
+            bleSubscriptionRef.current.remove();
+            bleSubscriptionRef.current = null;
+          }
+          console.log('✅ Continuous BLE scanning stopped');
+        } catch (error) {
+          console.error('Error stopping BLE scanning:', error);
+        }
+
         await stopAdServing();
 
-        // Show notification when display disconnects
-        try {
-          const notificationService = await loadNotificationService();
-          await notificationService.showDisplayDisconnectedNotification();
-        } catch (error) {
-          console.error('Failed to load NotificationService:', error);
+        // Check if this was a user-initiated shutdown (use ref to avoid stale closures)
+        if (userInitiatedShutdownRef.current) {
+          console.log('📊 Disconnection was user-initiated (Turn Off button), no monitoring');
+          setUserInitiatedShutdown(false);
+          userInitiatedShutdownRef.current = false;
+          // Don't report to backend (already reported as 'turned_off')
+          return;
         }
+
+        // This is an unintended disconnection - report and start monitoring
+        console.log('📊 Unintended disconnection detected - reporting to backend and starting monitoring');
+        await DisplayStatusAPI.reportDisconnected('Bluetooth connection lost');
+        await DisplayMonitorService.handleDisconnection(event.id, event.name);
 
         const message = event.error
           ? `Disconnected from ${event.name}: ${event.error}`
@@ -159,7 +259,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
         setIsScanning(false);
         connectToFirstDevice(event.devices[0]);
       } else {
-        // No devices found after 5-second timeout (handled natively)
+        // No devices found after 10-second timeout (handled natively)
         console.log('No devices found after timeout, updating UI state');
         console.log('Setting isScanning to false and isConnecting to false');
         setIsScanning(false);
@@ -188,6 +288,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
     }
     if (discoverySubscriptionRef.current) {
       discoverySubscriptionRef.current.remove();
+    }
+    if (bleSubscriptionRef.current) {
+      bleSubscriptionRef.current.remove();
     }
   };
 
@@ -221,6 +324,65 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
     Linking.openSettings();
   };
 
+  const requestBluetoothPermissions = async (): Promise<boolean> => {
+    if (Platform.OS !== 'android') {
+      return true;
+    }
+
+    try {
+      const apiLevel = Platform.Version;
+
+      if (apiLevel >= 31) {
+        // Android 12+ requires BLUETOOTH_SCAN and BLUETOOTH_CONNECT
+        const permissions = [
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+        ];
+
+        const results = await PermissionsAndroid.requestMultiple(permissions);
+
+        const scanGranted = results[PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN] === PermissionsAndroid.RESULTS.GRANTED;
+        const connectGranted = results[PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT] === PermissionsAndroid.RESULTS.GRANTED;
+
+        if (!scanGranted || !connectGranted) {
+          Alert.alert(
+            'Bluetooth Permissions Required',
+            'This app needs Bluetooth permissions to connect to your LED display. Please grant the permissions to continue.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Settings', onPress: openBluetoothSettings },
+            ]
+          );
+          return false;
+        }
+
+        return true;
+      } else {
+        // Android 11 and below use ACCESS_FINE_LOCATION for Bluetooth scanning
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION
+        );
+
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          Alert.alert(
+            'Location Permission Required',
+            'Location permission is required for Bluetooth scanning on this Android version. Please grant the permission to continue.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Settings', onPress: openBluetoothSettings },
+            ]
+          );
+          return false;
+        }
+
+        return true;
+      }
+    } catch (error) {
+      console.error('Error requesting Bluetooth permissions:', error);
+      return false;
+    }
+  };
+
   const handleTurnOnDisplay = async () => {
     try {
       // Load DisplayManager when user first interacts with display functionality
@@ -241,6 +403,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
 
         if (success) {
           console.log('Display turned on successfully');
+          // Report manual turn on to backend
+          await DisplayStatusAPI.reportTurnedOn();
+          // Stop monitoring if it was running
+          DisplayMonitorService.stopMonitoring();
+          setShowDisconnectWarning(false);
+          setDisconnectionDuration(0);
         } else {
           console.log('Failed to turn on display');
           Alert.alert('Error', 'Failed to turn on display');
@@ -252,6 +420,25 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
       console.log('=== CHECKING BLUETOOTH STATE ===');
       let bluetoothState: BluetoothState = await manager.checkBluetoothState();
       console.log('Initial Bluetooth state:', bluetoothState);
+
+      // Check if Bluetooth hardware is available
+      if (bluetoothState.available === false) {
+        Alert.alert(
+          'Bluetooth Not Available',
+          'This device does not have Bluetooth hardware or Bluetooth is not supported. You need a device with Bluetooth to connect to your LED display.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // Request Bluetooth permissions
+      console.log('=== REQUESTING BLUETOOTH PERMISSIONS ===');
+      const hasPermissions = await requestBluetoothPermissions();
+      if (!hasPermissions) {
+        console.log('Bluetooth permissions not granted');
+        return;
+      }
+      console.log('Bluetooth permissions granted');
 
       if (!bluetoothState.enabled) {
         // Give user a moment to enable Bluetooth after granting permission
@@ -294,8 +481,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
         return;
       }
 
-      console.log('Scan started successfully, native timeout will fire in 5 seconds');
-      // Timeout is now handled natively in DisplayManagerBridge (5 seconds)
+      console.log('Scan started successfully, native timeout will fire in 10 seconds');
+      // Timeout is now handled natively in DisplayManagerBridge (10 seconds)
       // Will automatically send empty device array if no devices found
 
     } catch (error) {
@@ -311,6 +498,14 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
       console.log('=== TURNING OFF DISPLAY ===');
       setIsConnecting(true);
 
+      // Mark this as an intentional disconnection BEFORE turning off
+      setUserInitiatedShutdown(true);
+      userInitiatedShutdownRef.current = true;
+      DisplayMonitorService.markIntentionalDisconnection();
+
+      // Report to backend that user is turning off
+      await DisplayStatusAPI.reportTurnedOff();
+
       // First, turn off the display
       console.log('Sending turn off command to display...');
       const manager = await loadDisplayManager();
@@ -319,6 +514,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
       if (!turnOffSuccess) {
         console.log('Failed to turn off display');
         setIsConnecting(false);
+        setUserInitiatedShutdown(false); // Reset flag on failure
+        userInitiatedShutdownRef.current = false;
         Alert.alert('Error', 'Failed to turn off display');
         return;
       }
@@ -333,6 +530,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
         if (!disconnectSuccess) {
           console.log('Failed to disconnect from device');
           setIsConnecting(false);
+          setUserInitiatedShutdown(false); // Reset flag on failure
+          userInitiatedShutdownRef.current = false;
           Alert.alert('Error', 'Failed to disconnect from display');
           return;
         }
@@ -343,12 +542,28 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
       console.log('🎯 Stopping background location tracking - display turned off');
       await BackgroundLocationService.stopLocationTracking();
 
+      // Stop continuous BLE scanning
+      console.log('📡 Stopping continuous BLE scanning - display turned off');
+      try {
+        const manager = await loadDisplayManager();
+        await manager.stopContinuousBLEScanning();
+        if (bleSubscriptionRef.current) {
+          bleSubscriptionRef.current.remove();
+          bleSubscriptionRef.current = null;
+        }
+        console.log('✅ Continuous BLE scanning stopped');
+      } catch (error) {
+        console.error('Error stopping BLE scanning:', error);
+      }
+
       setIsConnecting(false);
       console.log('Display turned off and disconnected successfully');
 
     } catch (error) {
       console.error('Error turning off display:', error);
       setIsConnecting(false);
+      setUserInitiatedShutdown(false); // Reset flag on error
+      userInitiatedShutdownRef.current = false;
       Alert.alert('Error', `Failed to turn off display: ${error}`);
     }
   };
@@ -369,16 +584,36 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
   };
 
   const displayAd = async (ad: AdResponse) => {
+    // Skip if currently sending to display
+    if (isSendingToDisplayRef.current) {
+      console.log(`⏭️ Skipping ad ${ad.ad_id} - already sending content to display`);
+      return;
+    }
+
     try {
-      // Use the content configuration from the API response
+      isSendingToDisplayRef.current = true;
+      console.log(`🎬 Starting to send ad ${ad.ad_id} to display`);
+
+      // Update display status based on ad response
+      // Priority: stationary > no_ads (is_default) > displaying (normal ad)
+      if (ad.is_stationary) {
+        setDisplayStatus('stationary');
+      } else if (ad.is_default) {
+        setDisplayStatus('no_ads');
+      } else {
+        // If is_stationary and is_default are both false/missing, we're displaying a real ad
+        setDisplayStatus('displaying');
+      }
+
+      // Validate and sanitize display parameters according to CoolLEDU protocol
       const config = {
         contentUrl: ad.content.contentUrl,
         displaySize: ad.content.displaySize,
         programType: ad.content.programType,
         templateMode: ad.content.templateMode || 'full',
-        mode: ad.content.mode || 9,
-        speed: ad.content.speed || 5,
-        stayTime: ad.content.stayTime || 150,
+        mode: validateMode(ad.content.mode),
+        speed: validateSpeed(ad.content.speed),
+        stayTime: validateStayTime(ad.content.stayTime),
         textContent: ad.content.textContent,
         textColor: ad.content.textColor,
       };
@@ -388,13 +623,16 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
       const manager = await loadDisplayManager();
       const success = await manager.displayContent(config);
       if (success) {
-        console.log(`Displayed ad: ${ad.ad_id} from campaign: ${ad.campaign_id}`);
+        console.log(`✅ Displayed ad: ${ad.ad_id} from campaign: ${ad.campaign_id}`);
         console.log(`Content type: ${ad.content.programType}, Template: ${ad.content.templateMode}`);
       } else {
         console.warn('Failed to display ad content');
       }
     } catch (error) {
       console.error('Error displaying ad:', error);
+    } finally {
+      isSendingToDisplayRef.current = false;
+      console.log(`🏁 Finished sending ad to display`);
     }
   };
 
@@ -457,6 +695,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
         <View style={styles.carImageSpacer} />
 
         <View style={styles.controlSection}>
+            {/* Display Status Indicator - only show when display is connected */}
+            <DisplayStatusIndicator
+              status={displayStatus}
+              visible={isDisplayConnected}
+            />
+
             <TouchableOpacity
               style={[
                 styles.displayButton,
@@ -491,6 +735,23 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
             </View>
           </View>
 
+          {/* Disconnection Warning Banner */}
+          {showDisconnectWarning && (
+            <TouchableOpacity
+              style={styles.disconnectWarningBanner}
+              onPress={handleTurnOnDisplay}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.disconnectWarningIcon}>⚠️</Text>
+              <View style={styles.disconnectWarningContent}>
+                <Text style={styles.disconnectWarningTitle}>Display Disconnected</Text>
+                <Text style={styles.disconnectWarningText}>
+                  Disconnected {disconnectionDuration} minute{disconnectionDuration !== 1 ? 's' : ''} ago. Tap to reconnect.
+                </Text>
+              </View>
+            </TouchableOpacity>
+          )}
+
           <View style={styles.helpSection}>
             <Text style={styles.helpTitle}>Need help?</Text>
             <Text style={styles.helpDescription}>
@@ -500,6 +761,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
               <Text style={styles.helpButtonText}>Contact us</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Version Display */}
+          {appVersion ? (
+            <View style={styles.versionContainer}>
+              <Text style={styles.versionText}>{appVersion}</Text>
+            </View>
+          ) : null}
         </View>
     </SafeAreaView>
   );
@@ -639,6 +907,43 @@ const styles = StyleSheet.create({
     borderColor: '#4A90E2',
     textAlign: 'center',
     lineHeight: 20,
+  },
+  versionContainer: {
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  versionText: {
+    color: '#999999',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  disconnectWarningBanner: {
+    backgroundColor: 'rgba(255, 152, 0, 0.15)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#FF9800',
+    padding: 16,
+    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  disconnectWarningIcon: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  disconnectWarningContent: {
+    flex: 1,
+  },
+  disconnectWarningTitle: {
+    color: '#FF9800',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  disconnectWarningText: {
+    color: '#FFCC80',
+    fontSize: 14,
   },
 });
 

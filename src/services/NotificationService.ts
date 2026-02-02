@@ -69,6 +69,7 @@ class NotificationServiceClass {
 
   /**
    * Show notification when display gets disconnected
+   * @deprecated Use showProlongedDisconnectionAlert instead for better UX
    */
   async showDisplayDisconnectedNotification(): Promise<void> {
     if (!this.isConfigured) {
@@ -111,6 +112,60 @@ class NotificationServiceClass {
       console.log('📱 Sent display disconnected notification');
     } catch (error) {
       console.error('📱 Failed to send display disconnected notification:', error);
+    }
+  }
+
+  /**
+   * Show notification for prolonged display disconnection (10+ minutes or failed reconnections)
+   * @param durationMinutes How long the display has been disconnected
+   */
+  async showProlongedDisconnectionAlert(durationMinutes: number): Promise<void> {
+    if (!this.isConfigured) {
+      console.warn('📱 Notifications not configured, skipping prolonged disconnection alert');
+      return;
+    }
+
+    try {
+      const message = durationMinutes >= 10
+        ? `Your display has been disconnected for ${durationMinutes} minutes. You may not be earning. Tap to reconnect now.`
+        : `Your display has been disconnected and automatic reconnection failed. Tap to reconnect and continue earning.`;
+
+      const notificationData = {
+        channelId: 'mobill-drivers',
+        title: '⚠️ Display Still Disconnected',
+        message: message,
+        playSound: true,
+        soundName: 'default',
+        importance: 'high',
+        priority: 'high',
+        vibrate: true,
+        vibration: 300,
+        ongoing: false,
+        autoCancel: true,
+        largeIcon: 'ic_launcher',
+        smallIcon: 'ic_notification',
+        userInfo: {
+          action: 'prolonged_disconnection',
+          duration: durationMinutes,
+          screen: 'home'
+        },
+      };
+
+      if (Platform.OS === 'ios') {
+        PushNotificationIOS.presentLocalNotification({
+          alertTitle: notificationData.title,
+          alertBody: notificationData.message,
+          soundName: 'default',
+          badge: 1,
+          userInfo: notificationData.userInfo,
+        });
+      } else {
+        PushNotification.localNotification(notificationData);
+      }
+
+      console.log(`📱 Sent prolonged disconnection alert (${durationMinutes} minutes)`);
+    } catch (error) {
+      console.error('📱 Failed to send prolonged disconnection alert:', error);
     }
   }
 
