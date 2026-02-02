@@ -252,11 +252,42 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
     }
 }
 
+- (void)sendChunksWithDelay:(NSArray *)chunks index:(NSInteger)index peripheral:(GWPeripheral *)peripheralModel
+{
+    if (index >= chunks.count) {
+        NSLog(@"✅ ✅ ✅ ALL CHUNKS SENT SUCCESSFULLY (NEW CODE ACTIVE)");
+        return; // All chunks sent
+    }
+
+    NSLog(@"📦 Sending chunk %ld of %lu with delay", (long)index, (unsigned long)chunks.count);
+    NSString *strTemp = chunks[index];
+    NSMutableData *data = [NSMutableData data];
+    for (int i = 0; i < strTemp.length; i += 2) {
+        NSString *temp = [strTemp substringWithRange:NSMakeRange(i, 2)];
+        [data appendData:[HLUtils stringToByte:temp]];
+    }
+
+    // Instrumentation: Log the raw bytes as hex before writing
+    NSMutableString *hexString = [NSMutableString string];
+    const unsigned char *bytes = (const unsigned char *)[data bytes];
+    for (NSUInteger i = 0; i < [data length]; i++) {
+        [hexString appendFormat:@"%02X ", bytes[i]];
+    }
+    NSLog(@"[GROK] Writing to 0000fff1 on %@ (%@): %@", peripheralModel.name, peripheralModel.UUIDString, hexString);
+
+    [peripheralModel.peripheral writeValue:data forCharacteristic:[self.characterDictionary objectForKey:peripheralModel.UUIDString] type:CBCharacteristicWriteWithoutResponse];
+
+    // Send next chunk after delay (10ms between chunks)
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.01 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        [self sendChunksWithDelay:chunks index:index + 1 peripheral:peripheralModel];
+    });
+}
+
 - (void)writeCommand:(NSString *)command onDevice:(GWPeripheral *)peripheralModel
 {
     NSMutableArray *arr = [NSMutableArray array];
     NSMutableString *mCommad = [NSMutableString stringWithString:command];
-    
+
     int commadLength = ([ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDM16 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDMX16 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDM32 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDU16 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDUX16 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDU32 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDUiLedBike12 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDU24 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDU20 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDHeightAdaption || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDC48) ? 360 : 38;
     while (mCommad.length >= commadLength) {
         NSString *str = [mCommad substringWithRange:NSMakeRange(0, commadLength)];
@@ -265,25 +296,9 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
     }
     NSString *str = [mCommad substringWithRange:NSMakeRange(0, mCommad.length)];
     [arr addObject:str];
-    
-    for (NSString *strTemp in arr) {
-        NSMutableData *data = [NSMutableData data];
-        for (int i = 0; i < strTemp.length; i += 2) {
-            NSString *temp = [strTemp substringWithRange:NSMakeRange(i, 2)];
-            [data appendData:[HLUtils stringToByte:temp]];
-        }
-        // Instrumentation: Log the raw bytes as hex before writing
-        NSMutableString *hexString = [NSMutableString string];
-        const unsigned char *bytes = (const unsigned char *)[data bytes];
-        for (NSUInteger i = 0; i < [data length]; i++) {
-            [hexString appendFormat:@"%02X ", bytes[i]];
-        }
-        NSLog(@"[GROK] Writing to 0000fff1 on %@ (%@): %@", peripheralModel.name, peripheralModel.UUIDString, hexString);
-        
-        [peripheralModel.peripheral writeValue:data forCharacteristic:[self.characterDictionary objectForKey:peripheralModel.UUIDString] type:CBCharacteristicWriteWithoutResponse];
-        [data resetBytesInRange:NSMakeRange(0, [data length])];
-        [data setLength:0];
-    }
+
+    // Send chunks with delay to prevent BLE overflow
+    [self sendChunksWithDelay:arr index:0 peripheral:peripheralModel];
     NSLog(@"当前方法:send============== %@", NSStringFromSelector(_cmd));
 }
 /*
@@ -646,19 +661,20 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
                 // If this is a mobill device, set up the display parameters but don't auto-show test menu
                 if ([peripheralModel.name hasPrefix:@"mobill"]) {
                     NSLog(@"📱 Connected to Mobill device - setting up for testing");
-                    
-                    // Set up device parameters for testing
-                    [ThemManager sharedInstance].deviceType = BTPeripheralTypeCoolLEDU16;
-                    currentColNum = @96;
-                    currentRowNum = @16;
+
+                    // Use device's actual dimensions and type (already set by GWPeripheral detection logic)
+                    // The deviceType, rowNum, and colNum should already be set based on the device's characteristics
+                    [ThemManager sharedInstance].deviceType = peripheralModel.deviceType;
+                    currentColNum = peripheralModel.colNum;
+                    currentRowNum = peripheralModel.rowNum;
+                    [ThemManager sharedInstance].colNum = peripheralModel.colNum;
+                    [ThemManager sharedInstance].rowNum = peripheralModel.rowNum;
                     [ThemManager sharedInstance].itemDeviceIdentify = peripheralModel.deviceId ?: @"mobill";
                     [ThemManager sharedInstance].peripheralName = @"CoolLEDU";
-                    peripheralModel.rowNum = @16;
-                    peripheralModel.colNum = @96;
-                    
+
                     // Just log that device is connected, but don't auto-show test menu
                     // User will need to press the test menu button instead
-                    NSLog(@"📱 Mobill device connected and configured - use test menu button to begin testing");
+                    NSLog(@"📱 Mobill device connected and configured (rows:%@, cols:%@) - use test menu button to begin testing", peripheralModel.rowNum, peripheralModel.colNum);
                 }
                 
                 if ([self.delegate respondsToSelector:@selector(didConnectedPeripheral:)]) {
@@ -751,15 +767,24 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
         return;
     }
     
+    NSLog(@"🧪🧪🧪 HLBluetoothManager COMPILED AT: %s %s", __DATE__, __TIME__);
+    NSLog(@"🔍 Device type: %d, decodeString: '%@'", (int)currentPeripheralModel.deviceType, decodeString);
+
     //区分不同设备类似的Response类型
     if(currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDM16 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDMX16 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDM32 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDU16 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDUX16 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDU32 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDUiLedBike12 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDU24 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDU20 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDHeightAdaption || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDC48){
+        NSLog(@"✅ Device type check PASSED");
         if ([decodeString hasPrefix:@"02"]) {
+            NSLog(@"✅ Prefix check PASSED for '02'");
             if([decodeString isEqual:@"0200"]){
+                NSLog(@"🔔 POSTING finishItem notification with type=1 for response 0200");
                 NSDictionary *userInfo = @{@"type": @(1)};
                 [[NSNotificationCenter defaultCenter] postNotificationName:finishItem object:nil userInfo:userInfo];
+                NSLog(@"🔔 finishItem notification posted");
             }else if ([decodeString isEqual:@"0201"]){
+                NSLog(@"🔔 POSTING finishItem notification with type=2 for response 0201");
                 NSDictionary *userInfo = @{@"type": @(2)};
                 [[NSNotificationCenter defaultCenter] postNotificationName:finishItem object:nil userInfo:userInfo];
+                NSLog(@"🔔 finishItem notification posted");
             }
             //NSLog(@"设置节目内容的响应");
             return;

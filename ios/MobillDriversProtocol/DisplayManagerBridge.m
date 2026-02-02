@@ -20,7 +20,7 @@
 
 static NSString * const MOBILL_DRIVERS_VERSION = @"2.96";
 
-@interface DisplayManagerBridge () <HLBluetoothManagerDelegate>
+@interface DisplayManagerBridge () <HLBluetoothManagerDelegate, CBCentralManagerDelegate>
 @property (nonatomic, strong) HLBluetoothManager *bluetoothManager;
 @property (nonatomic, strong) RCTPromiseResolveBlock pendingResolve;
 @property (nonatomic, strong) RCTPromiseRejectBlock pendingReject;
@@ -36,6 +36,11 @@ static NSString * const MOBILL_DRIVERS_VERSION = @"2.96";
 @property (nonatomic, assign) int currentDisplayHeight;
 @property (nonatomic, strong) NSTimer *scanTimeoutTimer;
 @property (nonatomic, assign) BOOL isScanActive;
+// Continuous BLE scanning for impression tracking
+@property (nonatomic, strong) CBCentralManager *continuousScanManager;
+@property (nonatomic, strong) NSTimer *continuousScanTimer;
+@property (nonatomic, strong) NSMutableArray *bleDevicesInCurrentScan;
+@property (nonatomic, assign) BOOL isContinuousScanActive;
 // Ultra-aggressive location tracking for car advertising
 @property (nonatomic, strong) CLLocationManager *locationManager;
 @property (nonatomic, strong) NSTimer *forceLocationTimer;
@@ -53,17 +58,21 @@ RCT_EXPORT_MODULE(DisplayManager)
 }
 
 - (NSArray<NSString *> *)supportedEvents {
-    return @[@"onDeviceDiscovered", @"onDeviceConnected", @"onDeviceDisconnected"];
+    return @[@"onDeviceDiscovered", @"onDeviceConnected", @"onDeviceDisconnected", @"onBLEScanResults"];
 }
 
 - (instancetype)init {
     if (self = [super init]) {
+
+        NSLog(@"🔧 DisplayManagerBridge init - registering for finishItem notifications");
 
         // CRITICAL: Register for finishItem notification like working native app
         [[NSNotificationCenter defaultCenter] addObserver:self
                                                  selector:@selector(sendNextItem:)
                                                      name:@"finishItem"
                                                    object:nil];
+
+        NSLog(@"🔧 DisplayManagerBridge registered for finishItem notifications, observer=%p", self);
 
         // Initialize notification key
         self.currentNotificationKey = NotificationKeyDefault;
@@ -72,8 +81,8 @@ RCT_EXPORT_MODULE(DisplayManager)
         self.currentDisplayMode = 1;
         self.currentDisplaySpeed = 1;
         self.currentStayTime = 30;
-        self.currentDisplayWidth = 96;
-        self.currentDisplayHeight = 16;
+        self.currentDisplayWidth = 160;
+        self.currentDisplayHeight = 32;
 
         // Don't initialize bluetoothManager here to avoid Bluetooth permission request on app startup
         // It will be initialized lazily when first needed
@@ -179,6 +188,113 @@ RCT_EXPORT_METHOD(stopScan:(RCTPromiseResolveBlock)resolve
     [self.bluetoothManager.manager stopScan];
     resolve(@(YES));
 }
+
+#pragma mark - Continuous BLE Scanning for Impression Tracking
+
+RCT_EXPORT_METHOD(startContinuousBLEScanning:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    NSLog(@"🔍 Starting continuous BLE scanning (25-second cycles)");
+
+    if (self.isContinuousScanActive) {
+        NSLog(@"⚠️ Continuous BLE scan already active");
+        resolve(@(YES));
+        return;
+    }
+
+    self.isContinuousScanActive = YES;
+
+    // Initialize CBCentralManager on main thread
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (!self.continuousScanManager) {
+            self.continuousScanManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil options:@{CBCentralManagerOptionShowPowerAlertKey: @NO}];
+            NSLog(@"🔍 Created CBCentralManager for continuous scanning");
+        }
+
+        // Check if Bluetooth is powered on
+        if (self.continuousScanManager.state == CBCentralManagerStatePoweredOn) {
+            [self performBLEScanCycle];
+        } else {
+            NSLog(@"🔍 Bluetooth not powered on (state: %ld), will start when ready", (long)self.continuousScanManager.state);
+        }
+    });
+
+    resolve(@(YES));
+}
+
+RCT_EXPORT_METHOD(stopContinuousBLEScanning:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+{
+    NSLog(@"🔍 Stopping continuous BLE scanning");
+
+    self.isContinuousScanActive = NO;
+
+    // Stop any active scan
+    if (self.continuousScanManager) {
+        [self.continuousScanManager stopScan];
+    }
+
+    // Cancel timer
+    if (self.continuousScanTimer) {
+        [self.continuousScanTimer invalidate];
+        self.continuousScanTimer = nil;
+    }
+
+    // Clear current scan data
+    self.bleDevicesInCurrentScan = nil;
+
+    resolve(@(YES));
+}
+
+- (void)performBLEScanCycle {
+    if (!self.isContinuousScanActive) {
+        NSLog(@"🔍 Continuous scanning stopped, skipping cycle");
+        return;
+    }
+
+    NSLog(@"🔍 Starting 25-second BLE scan cycle...");
+
+    // Initialize collection for this scan
+    self.bleDevicesInCurrentScan = [NSMutableArray array];
+
+    // Start scanning for all peripherals
+    [self.continuousScanManager scanForPeripheralsWithServices:nil
+                                                        options:@{CBCentralManagerScanOptionAllowDuplicatesKey: @NO}];
+
+    // Schedule scan completion after 25 seconds
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(25.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (!self.isContinuousScanActive) {
+            return;
+        }
+
+        // Stop scanning
+        [self.continuousScanManager stopScan];
+
+        // Sort devices by RSSI (strongest first)
+        NSArray *sortedDevices = [self.bleDevicesInCurrentScan sortedArrayUsingComparator:^NSComparisonResult(NSDictionary *d1, NSDictionary *d2) {
+            return [d2[@"rssi"] compare:d1[@"rssi"]];
+        }];
+
+        NSLog(@"🔍 Scan cycle complete: %lu devices found", (unsigned long)sortedDevices.count);
+
+        // Emit results to React Native
+        [self sendEventWithName:@"onBLEScanResults" body:@{
+            @"devices": sortedDevices,
+            @"timestamp": @([[NSDate date] timeIntervalSince1970] * 1000)
+        }];
+
+        // Clear for next cycle
+        self.bleDevicesInCurrentScan = nil;
+
+        // Schedule next scan cycle immediately
+        if (self.isContinuousScanActive) {
+            NSLog(@"🔍 Scheduling next scan cycle...");
+            [self performBLEScanCycle];
+        }
+    });
+}
+
+#pragma mark - Device Connection
 
 RCT_EXPORT_METHOD(connectToDevice:(NSString *)deviceId
                   resolver:(RCTPromiseResolveBlock)resolve
@@ -355,18 +471,22 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
             return;
         }
 
-        NSLog(@"Turning OFF display");
+        NSLog(@"🔴 Turning display OFF - setting brightness to 0");
 
-        // Command to turn display OFF (from manufacturer logs: 00020500)
-        NSString *turnOffCommand = @"00020500";
-        NSString *finalCommand = [NSString finalDataWith:turnOffCommand];
+        // Simple OFF command: set brightness to 0
+        // Based on manufacturer logs: 0100 02 05 XX 03 where XX is brightness (00 = off)
+        NSString *brightnessOffCmd = @"00020500";
+        NSString *finalCommand = [NSString finalDataWith:brightnessOffCmd];
 
-        NSLog(@"Sending turn OFF command: %@ -> %@", turnOffCommand, finalCommand);
+        NSLog(@"🔴 Sending brightness=0 command: %@ -> %@", brightnessOffCmd, finalCommand);
 
         [[HLBluetoothManager standardManager] writeCommand:finalCommand onDevice:self.connectedDevice];
 
-        NSLog(@"Turn OFF command sent successfully");
-        resolve(@(YES));
+        // Wait a moment for command to be sent and processed
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            NSLog(@"🔴 Display turned OFF - safe to disconnect");
+            resolve(@(YES));
+        });
 
     } @catch (NSException *exception) {
         NSLog(@"Exception turning OFF display: %@", exception.reason);
@@ -375,7 +495,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
 }
 
 
-
+/*
 - (void)displayImageOnDevice:(UIImage *)image
                     resolver:(RCTPromiseResolveBlock)resolve
                     rejecter:(RCTPromiseRejectBlock)reject
@@ -401,26 +521,28 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     // Store image for later use in notification handler
     self.lastImage = image;
 
-    // Configure device properties exactly as working native
-    device.rowNum = @16;
-    device.colNum = @96;
-    device.deviceType = BTPeripheralTypeCoolLEDU16;
+    // Use device's actual dimensions and type
+    int deviceHeight = device.rowNum ? device.rowNum.intValue : 32;
+    int deviceWidth = device.colNum ? device.colNum.intValue : 160;
+    BTPeripheralType deviceType = device.deviceType;
 
-    // Configure ThemManager exactly as working native
-    [ThemManager sharedInstance].deviceType = BTPeripheralTypeCoolLEDU16;
+    // Configure ThemManager with actual device properties
+    [ThemManager sharedInstance].deviceType = deviceType;
+    [ThemManager sharedInstance].colNum = device.colNum;
+    [ThemManager sharedInstance].rowNum = device.rowNum;
     [ThemManager sharedInstance].itemDeviceIdentify = [NSString stringWithFormat:@"%03d%03d%03d",
-                                                      (int)BTPeripheralTypeCoolLEDU16, 16, 96];
+                                                      (int)deviceType, deviceHeight, deviceWidth];
     [ThemManager sharedInstance].peripheralName = @"CoolLEDU";
 
     // Set notification key for responses
     self.currentNotificationKey = NotificationKeyGraffiti16;
 
-    // Create models using working native JTCommon methods
+    // Create models using working native JTCommon methods with dynamic dimensions
     GraffitiModel32 *graffitiModel = [JTCommon getGraffitiModel32WithCoverType:0
                                                                       startRow:0
                                                                       startCol:0
-                                                                     widthData:96
-                                                                    heightData:16];
+                                                                     widthData:deviceWidth
+                                                                    heightData:deviceHeight];
 
     // Use working native JTCommon image processing
     NSArray *pixelData = [JTCommon getColorDataDefaultFromImage:image scale:1.0];
@@ -435,6 +557,9 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     colorItemModel.itemContentCount = 1;
     colorItemModel.graffitiModel32Arr = @[graffitiModel];
 
+    // Delete all programs to prevent memory exhaustion (prevents crash after 3rd display)
+    [JTTool deleteProgramCommand:0xFF onDevice:device];
+
     // Use working native JTTool method
     [JTTool startItemContentCommand:colorItemModel
                            itemRank:0
@@ -444,6 +569,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
 
 }
 
+*/
 #pragma mark - Core Image Display Logic
 
 - (UIImage *)downloadWhiteImageFromAPI {
@@ -512,11 +638,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
         }
     }
 
-    // Store promise for later resolution (critical for working notification handling)
-    self.pendingResolve = resolve;
-    self.pendingReject = reject;
-
-    // Verify device connection
+    // Verify device connection BEFORE storing promise
     BOOL deviceReady = [self isDeviceConnected];
     if (!deviceReady) {
         reject(@"DEVICE_NOT_READY", @"Device connection could not be verified", nil);
@@ -529,29 +651,38 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
         return;
     }
 
+    NSLog(@"🎨🎨🎨 DISPLAY IMAGE CALLED - BUILD TIMESTAMP: %s %s", __DATE__, __TIME__);
+
+    // Store promise for later resolution AFTER validation (critical fix for promise leak)
+    self.pendingResolve = resolve;
+    self.pendingReject = reject;
+
     // Store image for later use in notification handler (critical for working method)
     self.lastImage = image;
 
     // Store display parameters for notification handler (critical fix)
     self.currentDisplayMode = mode.intValue;
     self.currentDisplaySpeed = speed.intValue;
-    self.currentStayTime = stayTime.intValue / 10; // Convert ms to appropriate units
+    self.currentStayTime = stayTime.intValue;
     self.currentDisplayWidth = [displaySize[@"width"] intValue];
     self.currentDisplayHeight = [displaySize[@"height"] intValue];
 
-    // Configure device properties
-    device.rowNum = @16;
-    device.colNum = @96;
-    device.deviceType = BTPeripheralTypeCoolLEDU16;
-
-    // Configure ThemManager
-    [ThemManager sharedInstance].deviceType = BTPeripheralTypeCoolLEDU16;
-    [ThemManager sharedInstance].itemDeviceIdentify = [NSString stringWithFormat:@"%03d%03d%03d",
-                                                      (int)BTPeripheralTypeCoolLEDU16, 16, 96];
-    [ThemManager sharedInstance].peripheralName = @"CoolLEDU";
-
-    // Set notification key for responses (critical for working method)
+    // CRITICAL FIX: Set notification key BEFORE sending any commands to prevent race condition
+    // If the device responds with 0200 before this is set, the notification handler will ignore it
     self.currentNotificationKey = NotificationKeyGraffiti16;
+
+    // Use device's actual dimensions and type
+    int deviceHeight = device.rowNum ? device.rowNum.intValue : 32;
+    int deviceWidth = device.colNum ? device.colNum.intValue : 160;
+    BTPeripheralType deviceType = device.deviceType;
+
+    // Configure ThemManager with actual device properties
+    [ThemManager sharedInstance].deviceType = deviceType;
+    [ThemManager sharedInstance].colNum = device.colNum;
+    [ThemManager sharedInstance].rowNum = device.rowNum;
+    [ThemManager sharedInstance].itemDeviceIdentify = [NSString stringWithFormat:@"%03d%03d%03d",
+                                                      (int)deviceType, deviceHeight, deviceWidth];
+    [ThemManager sharedInstance].peripheralName = @"CoolLEDU";
 
     // Extract display size parameters
     NSNumber *width = displaySize[@"width"];
@@ -563,7 +694,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
                                                                      height:height.intValue
                                                                        mode:mode.intValue
                                                                       speed:speed.intValue
-                                                                   stayTime:stayTime.intValue / 100];
+                                                                   stayTime:stayTime.intValue];
 
     // Use working native JTTool method
     [JTTool startItemContentCommand:colorItemModel
@@ -571,6 +702,13 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
                      itemTotalCount:1
                            onDevice:device];
 
+    // CRITICAL: Send actual text data like manufacturer does (similar to animation protocol)
+    //[JTTool setItemContentCommand:colorItemModel
+    //                     itemRank:0
+    //                       VCType:1
+    //                     onDevice:device];
+
+    
     // Don't resolve immediately - let notification handler do it (critical for working method)
 }
 
@@ -584,10 +722,6 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject
 {
-
-    // Store promise for later resolution
-    self.pendingResolve = resolve;
-    self.pendingReject = reject;
 
     // Configure device for the specified display size
     [self configureDeviceForDisplaySize:displaySize];
@@ -616,7 +750,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     colorTextModel.showModel = mode.intValue;
     colorTextModel.speedData = speed.intValue;
     colorTextModel.stayTime = stayTime.intValue;
-    colorTextModel.font = 16; // Use font size 16 for 16-height display (proper font files now available)
+    colorTextModel.font = height.intValue; // Use font size matching display height
     colorTextModel.bold = YES; // Normal text, not bold
     colorTextModel.colorShowType = 1; // Default color type
 
@@ -671,21 +805,29 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     // CRITICAL: Calculate itemContentCount AFTER setting the text models
     colorItemModel.itemContentCount = [JTCommon getItemContentCount:colorItemModel];
 
-    // CRITICAL: Set deviceIdentify directly on ColorItemModel32 (like manufacturer)
+    // CRITICAL: Set deviceIdentify directly on ColorItemModel32 using dynamic device type
+    GWPeripheral *device = self.connectedDevice;
+    int deviceHeight = device.rowNum ? device.rowNum.intValue : 32;
+    int deviceWidth = device.colNum ? device.colNum.intValue : 160;
+    BTPeripheralType deviceType = device.deviceType;
+
     colorItemModel.itemDeviceIdentify = [NSString stringWithFormat:@"%03d%03d%03d",
-                                        (int)BTPeripheralTypeCoolLEDU16, 16, 96];
+                                        (int)deviceType, deviceHeight, deviceWidth];
 
 
     // CRITICAL: Generate content structure BEFORE calling startItemContentCommand (like manufacturer)
     NSString *sendItem = [JTTool getItemTotalContent:colorItemModel];
 
     // Complete text protocol: startItemContentCommand then setItemContentCommand
-
-    GWPeripheral *device = self.connectedDevice;
+    // Device was already retrieved above, no need to redeclare
     if (!device) {
         reject(@"NO_DEVICE", @"No device connected", nil);
         return;
     }
+
+    // Store promise for later resolution AFTER validation (critical fix for promise leak)
+    self.pendingResolve = resolve;
+    self.pendingReject = reject;
 
     // Use manufacturer's working protocol for text content
     [JTTool startItemContentCommand:colorItemModel
@@ -711,29 +853,29 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
                        resolver:(RCTPromiseResolveBlock)resolve
                        rejecter:(RCTPromiseRejectBlock)reject
 {
-    
+
     // Store animation parameters for potential notification handler use
     self.currentDisplayMode = mode.intValue;
     self.currentDisplaySpeed = speed.intValue;
     self.currentStayTime = stayTime.intValue;
-    
-    // Store promise for later resolution
-    self.pendingResolve = resolve;
-    self.pendingReject = reject;
-    
-    // Verify device connection
+
+    // Verify device connection BEFORE storing promise
     BOOL deviceReady = [self isDeviceConnected];
     if (!deviceReady) {
         reject(@"DEVICE_NOT_READY", @"Device connection could not be verified", nil);
         return;
     }
-    
+
     GWPeripheral *device = self.connectedDevice;
     if (!device) {
         reject(@"NO_DEVICE", @"No device connected", nil);
         return;
     }
-    
+
+    // Store promise for later resolution AFTER validation (critical fix for promise leak)
+    self.pendingResolve = resolve;
+    self.pendingReject = reject;
+
     // Configure device for the specified display size
     [self configureDeviceForDisplaySize:displaySize];
     
@@ -745,9 +887,9 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     NSNumber *width = displaySize[@"width"];
     NSNumber *height = displaySize[@"height"];
     
-    
-    // Use the same notification key as successful static images
-    self.currentNotificationKey = NotificationKeyGraffiti16;
+
+    // Use animation notification key (animations don't need two-phase protocol like images)
+    self.currentNotificationKey = NotificationKeyAnimationSetView16;
     
     // Create animation models using working native JTCommon methods
     AnimationModel32 *animationModel = [JTCommon getAnimationModel32WithCoverType:1
@@ -805,7 +947,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     // Manufacturer uses empty frameEveInterval, not individual frame intervals
     animationModel.frameEveInterval = @[]; // Empty array like manufacturer
     // Manufacturer uses timeIntervalAnimation: 548, not speed value
-    animationModel.timeIntervalAnimation = 1500; // Match manufacturer's working value
+    animationModel.timeIntervalAnimation = 200; // Match manufacturer's working value
     
     
     // Create ColorItemModel32 with animation content - match manufacturer's values
@@ -824,7 +966,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     
     // CRITICAL: Generate content structure BEFORE calling startItemContentCommand (like manufacturer)
     NSString *sendItem = [JTTool getItemTotalContent:colorItemModel];
-    
+
     // Complete animation protocol: startItemContentCommand then setItemContentCommand
     [JTTool startItemContentCommand:colorItemModel
                            itemRank:0
@@ -862,7 +1004,13 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     size_t frameCount = CGImageSourceGetCount(source);
     NSMutableArray<UIImage *> *frames = [NSMutableArray array];
 
-    for (size_t i = 0; i < frameCount; i++) {
+    // Limit to 40 frames maximum to match manufacturer app behavior
+    const NSInteger MAX_FRAMES = 40;
+    NSInteger step = frameCount > MAX_FRAMES ? (frameCount / MAX_FRAMES) : 1;
+
+    NSLog(@"📹 GIF has %zu frames, sampling every %ldth frame (max %ld frames)", frameCount, (long)step, (long)MAX_FRAMES);
+
+    for (size_t i = 0; i < frameCount && frames.count < MAX_FRAMES; i += step) {
         CGImageRef imageRef = CGImageSourceCreateImageAtIndex(source, i, NULL);
         if (imageRef) {
             UIImage *originalFrame = [UIImage imageWithCGImage:imageRef];
@@ -871,6 +1019,8 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
             CGImageRelease(imageRef);
         }
     }
+
+    NSLog(@"📹 Extracted %lu frames from GIF (limited from %zu)", (unsigned long)frames.count, frameCount);
 
     CFRelease(source);
     return frames;
@@ -996,7 +1146,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     }
 
     // Auto-detect device type based on dimensions
-    BTPeripheralType deviceType = [GWPeripheral deviceTypeWithName:@"CoolLED"
+    BTPeripheralType deviceType = [GWPeripheral deviceTypeWithName:@"CoolLEDU"
                                                             colNum:width
                                                             rowNum:height];
 
@@ -1052,20 +1202,25 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
 - (void)sendNextItem:(NSNotification *)notification {
     NSDictionary *userInfo = notification.userInfo;
     NSNumber *type = userInfo[@"type"];
-    NSNumber *itemRank = userInfo[@"itemRank"];
-    NSNumber *vcType = userInfo[@"VCType"];
-    
+    NSNumber *itemRank = userInfo[@"itemRank"] ?: @(0); // Default to 0 if not provided
+    NSNumber *vcType = userInfo[@"VCType"] ?: @(1); // Default to 1 if not provided
+
+    NSLog(@"📨 sendNextItem notification received - type:%@, itemRank:%@, vcType:%@, currentKey:%d",
+          type, itemRank, vcType, self.currentNotificationKey);
 
     // Handle notifications for both graffiti and animation display keys
     if (self.currentNotificationKey == NotificationKeyGraffiti16) {
 
         if ([type intValue] == 1) {
+            NSLog(@"✅ Sending image data packets (type=1, key=NotificationKeyGraffiti16)");
 
             // Get connected device
             GWPeripheral *device = self.connectedDevice;
             if (!device) {
                 return;
             }
+
+            NSLog(@"📐 Display dimensions: width=%d, height=%d", self.currentDisplayWidth, self.currentDisplayHeight);
 
             // Create models exactly as before using working native JTCommon
             GraffitiModel32 *graffitiModel = [JTCommon getGraffitiModel32WithCoverType:0
@@ -1074,9 +1229,15 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
                                                                           widthData:self.currentDisplayWidth
                                                                          heightData:self.currentDisplayHeight];
 
+            NSLog(@"📐 GraffitiModel32 created: coverType=0, rows=%d, cols=%d", self.currentDisplayHeight, self.currentDisplayWidth);
+
             if (self.lastImage) {
+                NSLog(@"📸 Processing lastImage for pixel data conversion");
                 NSArray *pixelData = [JTCommon getColorDataDefaultFromImage:self.lastImage scale:1.0];
                 graffitiModel.dataGraffiti = pixelData;
+                NSLog(@"📸 Pixel data generated: %lu items", (unsigned long)pixelData.count);
+            } else {
+                NSLog(@"❌ ERROR: self.lastImage is nil! Cannot send image data!");
             }
             graffitiModel.showModelGraffiti = self.currentDisplayMode;
             graffitiModel.speedDataGraffiti = self.currentDisplaySpeed;
@@ -1089,8 +1250,32 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
             colorItemModel.itemContentCount = 1;
             colorItemModel.graffitiModel32Arr = @[graffitiModel];
 
+            NSLog(@"📡 Calling JTTool.setItemContentCommand with itemRank:%d, mode:%d, speed:%d, stayTime:%d",
+                  [itemRank intValue], self.currentDisplayMode, self.currentDisplaySpeed, self.currentStayTime);
+
             // Use working native JTTool method
             [JTTool setItemContentCommand:colorItemModel itemRank:[itemRank intValue] VCType:1 onDevice:device];
+
+            NSLog(@"📡 JTTool.setItemContentCommand call completed");
+
+        } else if ([type intValue] == 2) {
+            NSLog(@"📨 Graffiti type:2 received (data transmission progress) - resolving promise");
+            // Type 2: Data transmission complete for images - resolve promise
+            if (self.pendingResolve) {
+                self.pendingResolve(@(YES));
+                self.pendingResolve = nil;
+                self.pendingReject = nil;
+            }
+
+        } else if ([type intValue] == 3) {
+            NSLog(@"✅ Graffiti type:3 received (display complete) - resolving promise");
+            // Type 3: Display complete - resolve promise
+            if (self.pendingResolve) {
+                self.pendingResolve(@(YES));
+                self.pendingResolve = nil;
+                self.pendingReject = nil;
+            }
+        }
 
     } else if (self.currentNotificationKey == NotificationKeyAnimationSetView16) {
 
@@ -1098,16 +1283,6 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
 
             // Animation notifications might be handled differently by the protocol
             // For now, let the JTTool.startItemContentCommand handle it without notification intervention
-        } else if ([type intValue] == 2) {
-
-            // Resolve promise on animation success
-            if (self.pendingResolve) {
-                self.pendingResolve(@(YES));
-                self.pendingResolve = nil;
-                self.pendingReject = nil;
-            }
-            return;
-        }
 
         } else if ([type intValue] == 2) {
 
@@ -1161,8 +1336,9 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
 }
 
 - (void)peripheralFound:(GWPeripheral *)peripheral {
+    // Normal scan logic (existing behavior for mobill device connection)
     if ([peripheral.name containsString:@"mobill"] || [peripheral.name.lowercaseString containsString:@"led"]) {
-        
+
         // Check if device is already discovered
         BOOL alreadyFound = NO;
         for (NSDictionary *existingDevice in self.discoveredDevices) {
@@ -1171,7 +1347,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
                 break;
             }
         }
-        
+
         if (!alreadyFound) {
             NSDictionary *deviceInfo = @{
                 @"id": peripheral.UUIDString,
@@ -1521,10 +1697,100 @@ RCT_EXPORT_METHOD(stopUltraLocationTracking:(RCTPromiseResolveBlock)resolve
     }];
 }
 
+#pragma mark - CBCentralManagerDelegate (Continuous BLE Scanning)
+
+- (void)centralManagerDidUpdateState:(CBCentralManager *)central {
+    // Only handle state updates for continuous scan manager
+    if (central != self.continuousScanManager) {
+        return;
+    }
+
+    NSString *stateString = @"unknown";
+    switch (central.state) {
+        case CBManagerStateUnknown:
+            stateString = @"unknown";
+            break;
+        case CBManagerStateResetting:
+            stateString = @"resetting";
+            break;
+        case CBManagerStateUnsupported:
+            stateString = @"unsupported";
+            break;
+        case CBManagerStateUnauthorized:
+            stateString = @"unauthorized";
+            break;
+        case CBManagerStatePoweredOff:
+            stateString = @"poweredOff";
+            NSLog(@"🔍 Continuous BLE scan manager powered off");
+            break;
+        case CBManagerStatePoweredOn:
+            stateString = @"poweredOn";
+            NSLog(@"🔍 Continuous BLE scan manager powered on");
+            // If continuous scanning was requested, start it now
+            if (self.isContinuousScanActive) {
+                [self performBLEScanCycle];
+            }
+            break;
+    }
+
+    NSLog(@"🔍 Continuous BLE scan manager state changed: %@", stateString);
+}
+
+- (void)centralManager:(CBCentralManager *)central
+ didDiscoverPeripheral:(CBPeripheral *)peripheral
+     advertisementData:(NSDictionary<NSString *,id> *)advertisementData
+                  RSSI:(NSNumber *)RSSI {
+    // Only handle continuous scan manager
+    if (central != self.continuousScanManager) {
+        return;
+    }
+
+    // Only collect if scan is active and collection array exists
+    if (self.bleDevicesInCurrentScan == nil || !self.isContinuousScanActive) {
+        return;
+    }
+
+    // Extract device name (prefer local name from advertisement data)
+    NSString *deviceName = advertisementData[CBAdvertisementDataLocalNameKey];
+    if (!deviceName || deviceName.length == 0) {
+        deviceName = peripheral.name;
+    }
+    if (!deviceName || deviceName.length == 0) {
+        deviceName = @"Unknown Device";
+    }
+
+    // Add device to current scan collection
+    NSDictionary *deviceInfo = @{
+        @"id": peripheral.identifier.UUIDString,
+        @"name": deviceName,
+        @"rssi": RSSI
+    };
+
+    [self.bleDevicesInCurrentScan addObject:deviceInfo];
+
+    // Log discovery (only log every 10th device to reduce noise)
+    if (self.bleDevicesInCurrentScan.count % 10 == 0) {
+        NSLog(@"🔍 Discovered %lu devices so far...", (unsigned long)self.bleDevicesInCurrentScan.count);
+    }
+}
+
 #pragma mark - Cleanup
 
 - (void)dealloc {
     [self invalidateScanTimer];
+
+    // Clean up continuous BLE scanning
+    if (self.isContinuousScanActive) {
+        self.isContinuousScanActive = NO;
+        if (self.continuousScanManager) {
+            [self.continuousScanManager stopScan];
+        }
+    }
+    if (self.continuousScanTimer) {
+        [self.continuousScanTimer invalidate];
+        self.continuousScanTimer = nil;
+    }
+    self.bleDevicesInCurrentScan = nil;
 
     if (self.forceLocationTimer) {
         [self.forceLocationTimer invalidate];

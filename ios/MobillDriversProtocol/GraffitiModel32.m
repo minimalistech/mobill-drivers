@@ -7,6 +7,8 @@
 //
 
 #import "GraffitiModel32.h"
+#import "ThemManager.h"
+#import "DNApplication.h"
 
 @implementation GraffitiModel32
 
@@ -16,12 +18,13 @@
         self.coverTypeGraffiti = 1;
         self.startRowGraffiti = 0;
         self.startColGraffiti = 0;
-        self.widthDataGraffiti = 96;
-        self.heightDataGraffiti = 32;
+        // Use dynamic dimensions from ThemManager
+        self.widthDataGraffiti = [[ThemManager sharedInstance].colNum intValue];
+        self.heightDataGraffiti = [[ThemManager sharedInstance].rowNum intValue];
         self.showModelGraffiti = 1;
         self.speedDataGraffiti = 8;
         self.stayTimeGraffiti = 2;
-        
+
         self.dataGraffiti = [[NSArray alloc] init];
     }
     return self;

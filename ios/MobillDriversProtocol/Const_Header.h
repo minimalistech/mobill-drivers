@@ -120,8 +120,10 @@
 #define kEnterForeground             @"kEnterForeground"
 
 // 取多语言的宏
-//#define showText(key) key
-#define showText(key)  [NSString stringWithFormat:@"%@", [[NSBundle bundleWithPath:[[NSBundle mainBundle] pathForResource:[NSString stringWithFormat:@"%@",[[NSUserDefaults standardUserDefaults] objectForKey:kAppLanguage]] ofType:@"lproj"]] localizedStringForKey:(key) value:nil table:@"InfoPlist"]]
+// Simplified version - localization files don't exist in native iOS code, so just return the key
+// This prevents NSBundle errors and (null) alerts when kAppLanguage is not set
+#define showText(key) key
+//#define showText(key)  [NSString stringWithFormat:@"%@", [[NSBundle bundleWithPath:[[NSBundle mainBundle] pathForResource:[NSString stringWithFormat:@"%@",[[NSUserDefaults standardUserDefaults] objectForKey:kAppLanguage] ?: @"en"] ofType:@"lproj"]] localizedStringForKey:(key) value:(key) table:@"InfoPlist"]]
 
 #pragma mark - CoolLED
 // 导航栏背景色

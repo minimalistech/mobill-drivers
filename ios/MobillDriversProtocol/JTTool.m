@@ -40,14 +40,40 @@
 
 //设置节目内容
 +(void)setItemContentCommand:(ColorItemModel32 *)colorItemModel32 itemRank:(int)itemRank VCType:(int)VCType onDevice:(GWPeripheral *)peripheralModel{
+    NSLog(@"🔧 setItemContentCommand called - itemRank:%d, VCType:%d", itemRank, VCType);
+
     //1.设置节目内容
     NSString *sendItem = [JTTool getItemTotalContent:colorItemModel32];
-    
+    NSLog(@"🔧 getItemTotalContent returned string length: %lu", (unsigned long)sendItem.length);
+
     //未经过压缩之前的数据
     NSData *sendItemData = [HLUtils stringToData:sendItem];
-    
+    NSLog(@"🔧 sendItemData size: %lu bytes (from %lu hex chars)", (unsigned long)sendItemData.length, (unsigned long)sendItem.length);
+
+    if (sendItemData.length == 0 && sendItem.length > 0) {
+        NSLog(@"❌ ERROR: stringToData conversion failed! String length: %lu", (unsigned long)sendItem.length);
+    }
+
     //3.发送设置节目内容命令
+    NSLog(@"🔧 Calling sendSetItemContentCommand...");
     [JTTool sendSetItemContentCommand:sendItemData itemRank:itemRank VCType:(int)VCType onDevice:peripheralModel];
+    NSLog(@"🔧 sendSetItemContentCommand completed");
+}
+
+//删除节目内容 (delete program to free device memory)
++(void)deleteProgramCommand:(int)programIndex onDevice:(GWPeripheral *)peripheralModel{
+    NSLog(@"🗑️ deleteProgramCommand called - programIndex:%d (0xFF=delete all)", programIndex);
+
+    // Protocol: Command 0x08 + program index
+    // programIndex: 0-8 for specific program, 0xFF for delete all
+    // Example from manual: 01 00 02 06 08 FF 03 (delete all)
+
+    NSString *deleteCommand = [NSString stringWithFormat:@"0002060%02x", programIndex & 0xFF];
+    NSString *finalCommand = [NSString finalDataWith:deleteCommand];
+
+    NSLog(@"🗑️ Sending delete command: %@", finalCommand);
+    [[HLBluetoothManager standardManager] writeCommand:finalCommand onDevice:peripheralModel];
+    NSLog(@"🗑️ Delete command sent successfully");
 }
 
 //拼接命令-开始设置节目内容命令
@@ -1147,9 +1173,15 @@
 
 //通过涂鸦类型点阵生成字符串类型字节数组
 +(NSString *)getStrFromGraffitiArr:(NSArray *)data{
-    
+
+    NSLog(@"🔍 getStrFromGraffitiArr: data.count=%lu (columns)", (unsigned long)data.count);
+    if (data.count > 0) {
+        NSArray *firstCol = data[0];
+        NSLog(@"🔍 First column has %lu items (rows)", (unsigned long)firstCol.count);
+    }
+
     NSString *graffitiContent = @"";
-    
+
     if([CurrentDeviceType isEqual:@"CoolLEDM"]){
         
         NSMutableArray *redData = [NSMutableArray array];
@@ -1183,27 +1215,37 @@
         graffitiContent = [graffitiContent stringByAppendingString:blueResult];
             
     }else if ([CurrentDeviceType isEqual:@"CoolLEDU"]){
-        
+
+        NSLog(@"🔍 CoolLEDU encoding: processing %lu columns", (unsigned long)data.count);
+        int totalPixels = 0;
+        int totalHexChars = 0;
+
         for (int i = 0; i < data.count; i++) {
             NSArray *cols = data[i];
-            
+
             NSString *colStr = @"";
             for (int j = 0; j < cols.count; j++) {
                 NSArray *rgbData = cols[j];
-                
+
                 CGFloat red = [rgbData[0] floatValue] ;
                 CGFloat green = [rgbData[1] floatValue];
                 CGFloat blue = [rgbData[2] floatValue];
-                
+
                 NSString *onePixel = @"";
                 onePixel = [onePixel stringByAppendingFormat:@"%02x", [HLUtils colorExchangeFloat:red]];
                 onePixel = [onePixel stringByAppendingFormat:@"%02x", [HLUtils colorExchangeFloat:green]* 16 + [HLUtils colorExchangeFloat:blue]];
-                
+
+                totalPixels++;
+                totalHexChars += onePixel.length;
+
                 colStr = [colStr stringByAppendingString:onePixel];
             }
             graffitiContent = [graffitiContent stringByAppendingString:colStr];
         }
-        
+
+        NSLog(@"🔍 CoolLEDU encoding complete: %d pixels, %d hex chars, final string length=%lu",
+              totalPixels, totalHexChars, (unsigned long)graffitiContent.length);
+
     }
     
     return graffitiContent;
@@ -1213,55 +1255,83 @@
 +(NSString *)getGraffitiContent:(GraffitiModel32 *)textModel{
     
     NSString *graffitiText = @"";
-    
+
     // 1.拼接1个字节表示该内容的类型
     graffitiText = [graffitiText stringByAppendingString:@"02"];
-    
+    NSLog(@"🔍 After type: len=%lu", (unsigned long)graffitiText.length);
+
     // 2.拼接7个字节预留字节
     for (int i = 0; i < 7; i++) {
         graffitiText = [graffitiText stringByAppendingString:@"00"];
     }
-    
+    NSLog(@"🔍 After 7 reserved: len=%lu", (unsigned long)graffitiText.length);
+
     // 3.拼接1个字节该内容显示的时候，和其他层级的内容的混合方式
-    graffitiText = [graffitiText stringByAppendingFormat:@"%02x", textModel.coverTypeGraffiti];
-    
+    NSString *coverType = [NSString stringWithFormat:@"%02x", textModel.coverTypeGraffiti];
+    NSLog(@"🔍 coverType value=%d formatted='%@' len=%lu", textModel.coverTypeGraffiti, coverType, (unsigned long)coverType.length);
+    graffitiText = [graffitiText stringByAppendingString:coverType];
+
     // 4.拼接2个字节该内容显示起始列
-    graffitiText = [graffitiText stringByAppendingFormat:@"%04x", textModel.startColGraffiti];
-    
+    NSString *startCol = [NSString stringWithFormat:@"%04x", textModel.startColGraffiti];
+    NSLog(@"🔍 startCol value=%d formatted='%@' len=%lu", textModel.startColGraffiti, startCol, (unsigned long)startCol.length);
+    graffitiText = [graffitiText stringByAppendingString:startCol];
+
     // 5.拼接2个字节该内容显示起始行
-    graffitiText = [graffitiText stringByAppendingFormat:@"%04x", textModel.startRowGraffiti];
-    
+    NSString *startRow = [NSString stringWithFormat:@"%04x", textModel.startRowGraffiti];
+    NSLog(@"🔍 startRow value=%d formatted='%@' len=%lu", textModel.startRowGraffiti, startRow, (unsigned long)startRow.length);
+    graffitiText = [graffitiText stringByAppendingString:startRow];
+
     // 6.拼接2个字节该内容显示宽度
-    graffitiText = [graffitiText stringByAppendingFormat:@"%04x", textModel.widthDataGraffiti];
-    
+    NSString *width = [NSString stringWithFormat:@"%04x", textModel.widthDataGraffiti];
+    NSLog(@"🔍 width value=%d formatted='%@' len=%lu", textModel.widthDataGraffiti, width, (unsigned long)width.length);
+    graffitiText = [graffitiText stringByAppendingString:width];
+
     // 7.拼接2个字节该内容显示高度
-    graffitiText = [graffitiText stringByAppendingFormat:@"%04x", textModel.heightDataGraffiti];
-    
+    NSString *height = [NSString stringWithFormat:@"%04x", textModel.heightDataGraffiti];
+    NSLog(@"🔍 height value=%d formatted='%@' len=%lu", textModel.heightDataGraffiti, height, (unsigned long)height.length);
+    graffitiText = [graffitiText stringByAppendingString:height];
+
     // 8.拼接1个字节显示模式
-    graffitiText = [graffitiText stringByAppendingFormat:@"%02x",textModel.showModelGraffiti];
-    
+    NSString *showModel = [NSString stringWithFormat:@"%02x", textModel.showModelGraffiti];
+    NSLog(@"🔍 showModel value=%d formatted='%@' len=%lu", textModel.showModelGraffiti, showModel, (unsigned long)showModel.length);
+    graffitiText = [graffitiText stringByAppendingString:showModel];
+
     // 9.拼接1个字节显示速度（显示模式的对应速度）
     //+239解决速度变化非线性，前期滑动速度不明显
-    graffitiText = [graffitiText stringByAppendingFormat:@"%02x",textModel.speedDataGraffiti + 239];
-    
+    // IMPORTANT: Mask to 1 byte (0-255) to prevent overflow
+    int speedValue = (textModel.speedDataGraffiti + 239) & 0xFF;
+    NSString *speed = [NSString stringWithFormat:@"%02x", speedValue];
+    NSLog(@"🔍 speed value=%d formatted='%@' len=%lu", speedValue, speed, (unsigned long)speed.length);
+    graffitiText = [graffitiText stringByAppendingString:speed];
+
     // 10.拼接1个字节停留时间（一屏显示完成后的停留时间）
-    graffitiText = [graffitiText stringByAppendingFormat:@"%02x",textModel.stayTimeGraffiti];
+    NSString *stayTime = [NSString stringWithFormat:@"%02x", textModel.stayTimeGraffiti];
+    NSLog(@"🔍 stayTime value=%d formatted='%@' len=%lu", textModel.stayTimeGraffiti, stayTime, (unsigned long)stayTime.length);
+    graffitiText = [graffitiText stringByAppendingString:stayTime];
     
     NSString *sumCheckedString = [self getStrFromGraffitiArr:textModel.dataGraffiti];
-    
+
+    NSLog(@"🔍 getGraffitiContent: pixel data string length=%lu", (unsigned long)sumCheckedString.length);
+
     // 存文字点阵数据的总长度
     int charsTotalLength = (int) sumCheckedString.length * 0.5 ;
-    
+
+    NSLog(@"🔍 getGraffitiContent: header before pixel data length=%lu", (unsigned long)graffitiText.length);
+
     // 11.拼接4个字节文字点阵数据的总长度
     graffitiText = [graffitiText stringByAppendingFormat:@"%08x", charsTotalLength];
-    
+
     // 12.文字点阵数据
     graffitiText = [graffitiText stringByAppendingString:sumCheckedString];
-    
+
+    NSLog(@"🔍 getGraffitiContent: total after pixel data length=%lu", (unsigned long)graffitiText.length);
+
     // 0.拼接4个字节该段内容所有数据的总长度
     int sendTotalLength = (int) graffitiText.length * 0.5 ;
     graffitiText = [[NSString stringWithFormat:@"%08x", (sendTotalLength+4)] stringByAppendingString:graffitiText];
-    
+
+    NSLog(@"🔍 getGraffitiContent: FINAL length=%lu (with 4-byte header)", (unsigned long)graffitiText.length);
+
     return graffitiText;
 }
 
@@ -1989,15 +2059,19 @@
         }
     }
 
+    NSLog(@"🔍 getItemTotalContent: START");
+
     NSString *sendItem = @"";
-    
+
     // 1.拼接8个字节预留字节
     for (int i = 0; i < 8; i++) {
         sendItem = [sendItem stringByAppendingString:@"00"];
     }
-    
+
     // 2.拼接1个字节该节目包含了多少个内容
     sendItem = [sendItem stringByAppendingFormat:@"%02x",colorItemModel32.itemContentCount];
+
+    NSLog(@"🔍 getItemTotalContent: header (8 reserved + 1 count) = %lu chars", (unsigned long)sendItem.length);
     
     
     
@@ -2372,10 +2446,12 @@
                 //拼接每个对象包括内容、颜色、边框组合
                 sendItem = [sendItem stringByAppendingString:colorTextModel32Str];
             }
-            
+
         }
     }
-    
+
+    NSLog(@"🔍 getItemTotalContent: FINAL sendItem length=%lu", (unsigned long)sendItem.length);
+
     return sendItem;
 }
 

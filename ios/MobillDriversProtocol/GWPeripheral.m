@@ -410,10 +410,16 @@
             _sendCompletion = nil;
         } else {
             _packageModel.currentPackageId++;
-            [self sendCurrentPackageCommand];
+            // Add small delay between packets to prevent BLE overflow (15ms)
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.015 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                [self sendCurrentPackageCommand];
+            });
         }
     } else {
-        [self sendCurrentPackageCommand];
+        // Device returned error/busy - add delay before retry (100ms)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [self sendCurrentPackageCommand];
+        });
     }
 }
 
@@ -603,13 +609,20 @@
     if (!parentVC) {
         return;
     }
-    
+
     if (!parentVC) {
         return;
     }
-    
+
+    // Skip alert for Mobill React Native app (same check as HUD)
+    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+    if ([bundleID isEqualToString:@"com.mobill.MobillDrivers"]) {
+        NSLog(@"🚫 Skipping send fail alert for Mobill app");
+        return;
+    }
+
     if (applicationSelf.notificationKey != NotificationKeySetView32) {
-        
+
         NSString *message = showText(@"发送数据失败提示");
         UIAlertController *aletVC = [UIAlertController alertControllerWithTitle:nil message:message preferredStyle:UIAlertControllerStyleAlert];
         NSMutableAttributedString *messageAtt = [[NSMutableAttributedString alloc] initWithString:message];

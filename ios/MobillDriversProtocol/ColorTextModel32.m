@@ -20,7 +20,7 @@
         self.startRow = 0;
         self.startCol = 0;
         self.widthData = [currentColNum intValue];
-        self.heightData = 32;
+        self.heightData = [currentRowNum intValue];
         self.showModel = 2;
         self.speedData = 247;
         self.isTrueSpeedData = 1;

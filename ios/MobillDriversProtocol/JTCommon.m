@@ -926,7 +926,7 @@
     int startRow = 0;
     int startCol = 0;
     int widthData = DeviceCol;
-    int heightData = 32;
+    int heightData = DeviceRow;
     int timeIntervalAnimation = 200;
     
     //对默认参数进行赋值
@@ -1569,8 +1569,9 @@ NSArray<NSNumber *> *getFrameDurationsFromGIF(UIImage *image) {
 
 //获取图片的原始Data数据 - Improved version with better pixel averaging
 + (NSArray *)getColorDataDefaultFromImage:(UIImage *)image scale:(CGFloat)scale {
-    // First create a properly resized image to avoid sampling artifacts
-    CGSize newSize = CGSizeMake(96, 16); // Fixed LED matrix size
+    // Use the image's actual size instead of forcing 160x32
+    // This allows displaying images on different sized displays (96x16, 160x32, etc.)
+    CGSize newSize = image.size;
     UIGraphicsBeginImageContextWithOptions(newSize, NO, 1.0);
     [image drawInRect:CGRectMake(0, 0, newSize.width, newSize.height)];
     UIImage *resizedImage = UIGraphicsGetImageFromCurrentImageContext();
@@ -1653,7 +1654,7 @@ NSArray<NSNumber *> *getFrameDurationsFromGIF(UIImage *image) {
 
 + (NSArray *)getDataFromFontImage:(UIImage *)image scale:(CGFloat)scale {
     // First create a properly resized image to avoid sampling artifacts
-    CGSize newSize = CGSizeMake(96, 16); // Fixed LED matrix size
+    CGSize newSize = CGSizeMake(160, 32); // Fixed LED matrix size
     UIGraphicsBeginImageContextWithOptions(newSize, NO, 1.0);
     [image drawInRect:CGRectMake(0, 0, newSize.width, newSize.height)];
     UIImage *resizedImage = UIGraphicsGetImageFromCurrentImageContext();

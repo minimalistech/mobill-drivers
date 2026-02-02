@@ -48,6 +48,9 @@ NS_ASSUME_NONNULL_BEGIN
 //获取节目总内容数据 (generates the complete content structure for animations)
 +(NSString *)getItemTotalContent:(ColorItemModel32 *)colorItemModel32;
 
+//删除节目内容 (delete program content to free device memory)
++(void)deleteProgramCommand:(int)programIndex onDevice:(GWPeripheral *)peripheralModel;
+
 @end
 
 NS_ASSUME_NONNULL_END
