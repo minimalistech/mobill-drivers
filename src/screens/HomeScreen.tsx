@@ -21,31 +21,23 @@ import DisplayStatusAPI from '../services/DisplayStatusAPI';
 import DisplayMonitorService from '../services/DisplayMonitorService';
 import { validateStayTime, validateSpeed, validateMode } from '../utils/displayValidation';
 import DisplayStatusIndicator, { type DisplayStatus } from '../components/DisplayStatusIndicator';
+import DisplayManagerModule from '../DisplayManager';
+import NotificationServiceModule from '../services/NotificationService';
 
-// Lazy load DisplayManager to prevent Bluetooth permissions on component mount
-let DisplayManager: any = null;
+// Use direct imports instead of lazy loading to avoid Metro bundler issues
+let DisplayManager: any = DisplayManagerModule;
 type BluetoothDevice = any;
 type BluetoothState = any;
 type DeviceConnectedEvent = any;
 type DeviceDisconnectedEvent = any;
 
-let NotificationService: any = null;
+let NotificationService: any = NotificationServiceModule;
 
 const loadDisplayManager = async () => {
-  if (!DisplayManager) {
-    const module = await import('../DisplayManager');
-    DisplayManager = module.default;
-    console.log('🔧 DisplayManager loaded dynamically');
-  }
   return DisplayManager;
 };
 
 const loadNotificationService = async () => {
-  if (!NotificationService) {
-    const module = await import('../services/NotificationService');
-    NotificationService = module.default;
-    console.log('📱 NotificationService loaded dynamically');
-  }
   return NotificationService;
 };
 
@@ -592,7 +584,11 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
 
     try {
       isSendingToDisplayRef.current = true;
-      console.log(`🎬 Starting to send ad ${ad.ad_id} to display`);
+
+      // Pause ad fetching while we process and display this ad
+      // This prevents new ad requests from being made during display
+      AdService.pauseAdFetching();
+      console.log(`🎬 Starting to send ad ${ad.ad_id} to display (ad fetching paused)`);
 
       // Update display status based on ad response
       // Priority: stationary > no_ads (is_default) > displaying (normal ad)
@@ -632,7 +628,10 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
       console.error('Error displaying ad:', error);
     } finally {
       isSendingToDisplayRef.current = false;
-      console.log(`🏁 Finished sending ad to display`);
+      // Resume ad fetching after content is sent
+      // The timer will restart, giving the ad its full display time before next fetch
+      AdService.resumeAdFetching();
+      console.log(`🏁 Finished sending ad to display (ad fetching resumed)`);
     }
   };
 

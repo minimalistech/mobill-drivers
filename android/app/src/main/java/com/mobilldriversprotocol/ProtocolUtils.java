@@ -199,6 +199,13 @@ public class ProtocolUtils {
         }
         return result;
     }
+
+    /**
+     * Convert byte array to hex string list (alias for byteArrayToHexList)
+     */
+    public static List<String> byte2hex(byte[] bytes) {
+        return byteArrayToHexList(bytes);
+    }
     
     /**
      * Convert hex string list to byte array

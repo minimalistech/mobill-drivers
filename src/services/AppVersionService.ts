@@ -1,5 +1,4 @@
-import DeviceInfo from 'react-native-device-info';
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 
 interface AppVersionHeaders {
   'X-App-Version': string;
@@ -20,30 +19,34 @@ class AppVersionServiceClass {
       return this.cachedHeaders;
     }
 
-    try {
-      const version = DeviceInfo.getVersion(); // e.g., "1.0.0"
-      const buildNumber = DeviceInfo.getBuildNumber(); // e.g., "1"
-      const platform = Platform.OS; // "ios" or "android"
+    let version = '1.0.0';
+    let buildNumber = '1';
+    const platform = Platform.OS;
 
-      this.cachedHeaders = {
-        'X-App-Version': version,
-        'X-App-Platform': platform,
-        'X-App-Build': buildNumber,
-      };
-
-      console.log('📱 App Version Info:', this.cachedHeaders);
-
-      return this.cachedHeaders;
-    } catch (error) {
-      console.error('Error getting app version info:', error);
-
-      // Fallback headers if DeviceInfo fails
-      return {
-        'X-App-Version': '0.0.1',
-        'X-App-Platform': Platform.OS,
-        'X-App-Build': '1',
-      };
+    // Check if native module exists before trying to use it
+    if (NativeModules.RNDeviceInfo) {
+      try {
+        const DeviceInfo = require('react-native-device-info').default;
+        if (DeviceInfo && typeof DeviceInfo.getVersion === 'function') {
+          version = DeviceInfo.getVersion();
+          buildNumber = DeviceInfo.getBuildNumber();
+        }
+      } catch (e) {
+        console.warn('DeviceInfo error, using fallback version');
+      }
+    } else {
+      console.warn('RNDeviceInfo native module not available, using fallback version');
     }
+
+    this.cachedHeaders = {
+      'X-App-Version': version,
+      'X-App-Platform': platform,
+      'X-App-Build': buildNumber,
+    };
+
+    console.log('📱 App Version Info:', this.cachedHeaders);
+
+    return this.cachedHeaders;
   }
 
   /**

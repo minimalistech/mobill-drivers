@@ -323,6 +323,31 @@ class AdServiceClass {
     return this.isAdServingActive;
   }
 
+  /**
+   * Pause ad fetching temporarily (e.g., while content is being processed/displayed)
+   * This stops the 15-second timer to prevent new ad requests
+   */
+  pauseAdFetching(): void {
+    if (this.backgroundInterval) {
+      BackgroundTimer.clearInterval(this.backgroundInterval);
+      this.backgroundInterval = null;
+      console.log('⏸️ Ad fetching paused - timer cleared');
+    }
+  }
+
+  /**
+   * Resume ad fetching after content display is complete
+   * Restarts the 15-second timer for the next ad request
+   */
+  resumeAdFetching(): void {
+    if (this.isAdServingActive && !this.backgroundInterval) {
+      this.backgroundInterval = BackgroundTimer.setInterval(() => {
+        this.fetchAndProcessAd();
+      }, 15000);
+      console.log('▶️ Ad fetching resumed - timer restarted (15 seconds)');
+    }
+  }
+
   private handleAppStateChange(nextAppState: AppStateStatus): void {
     if (this.isAdServingActive) {
       if (nextAppState === 'background') {

@@ -1,23 +1,17 @@
 import BackgroundTimer from 'react-native-background-timer';
 import DisplayStatusAPI from './DisplayStatusAPI';
+import NotificationServiceModule from './NotificationService';
+import DisplayManagerModule from '../DisplayManager';
 
-// Lazy load to prevent early permission requests
-let NotificationService: any = null;
-let DisplayManager: any = null;
+// Use direct imports to avoid Metro bundler issues with lazy loading
+let NotificationService: any = NotificationServiceModule;
+let DisplayManager: any = DisplayManagerModule;
 
 const loadNotificationService = async () => {
-  if (!NotificationService) {
-    const module = await import('./NotificationService');
-    NotificationService = module.default;
-  }
   return NotificationService;
 };
 
 const loadDisplayManager = async () => {
-  if (!DisplayManager) {
-    const module = await import('../DisplayManager');
-    DisplayManager = module.default;
-  }
   return DisplayManager;
 };
 

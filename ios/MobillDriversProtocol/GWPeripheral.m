@@ -616,7 +616,7 @@
 
     // Skip alert for Mobill React Native app (same check as HUD)
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if ([bundleID isEqualToString:@"com.mobill.MobillDrivers"]) {
+    if ([bundleID isEqualToString:@"com.mobill.drivers"]) {
         NSLog(@"🚫 Skipping send fail alert for Mobill app");
         return;
     }

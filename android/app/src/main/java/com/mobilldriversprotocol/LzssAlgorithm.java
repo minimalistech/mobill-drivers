@@ -27,14 +27,29 @@ public class LzssAlgorithm {
     
     /**
      * 初始化二叉树 lson为左叶子节点，rson为右子节点，dad为父节点
+     * FIXED: Also initialize lson array to prevent corruption from previous calls
      */
     public static void InitTree() {
-        int i = 0;
-        for (i = N + 1; i <= N + 256; i++) {
+        int i;
+
+        // Initialize all arrays to NIL to prevent corruption from previous calls
+        // This is critical for thread-safety and preventing ArrayIndexOutOfBoundsException
+        for (i = 0; i < N + 1; i++) {
+            lson[i] = NIL;
+            dad[i] = NIL;
+        }
+
+        for (i = 0; i < N + 257; i++) {
             rson[i] = NIL;
         }
-        for (i = 0; i < N; i++) {
-            dad[i] = NIL;
+
+        // Reset state variables
+        match_position = 0;
+        match_length = 0;
+
+        // Clear enbuffer
+        for (i = 0; i < N + F - 1; i++) {
+            enbuffer[i] = 0;
         }
     }
     
@@ -147,13 +162,126 @@ public class LzssAlgorithm {
     
     /**
      * LZSS压缩核心算法
-     * @param inputByteData 输入字节数组
+     * Ported from manufacturer's CoolledUUtils.java
+     * @param data 输入字节数组
      * @return 压缩后的字节数组
+     *
+     * FIXED: synchronized to prevent concurrent access to static arrays
      */
-    public static byte[] lzssCompress(byte[] inputByteData) {
-        // Implementation would be complex - for now return a simplified version
-        // that calls the native compression logic when integrated
-        return inputByteData; // Placeholder - implement full compression logic
+    public static synchronized byte[] lzssCompress(byte[] data) {
+        if (data == null || data.length == 0) {
+            return data;
+        }
+
+        int i, len, r, s, last_match_length, code_buf_ptr;
+        byte c = 0, mask = 0;
+        byte[] code_buf = new byte[17];
+        int currEncodeIndex = 0; // 当前处理的数据位置
+        int encodeDataLen = data.length; // 压缩数据的原始长度
+        List<Byte> resultBuffer = new ArrayList<Byte>(); // 压缩结果输出
+
+        textsize = 0;
+        codesize = 0;
+        printcount = 0;
+
+        InitTree();
+
+        code_buf[0] = 0;
+        code_buf_ptr = mask = 1;
+        s = 0;
+        r = N - F;
+
+        for (i = s; i < r; i++) {
+            enbuffer[i] = 0;
+        }
+
+        for (len = 0; len < F && currEncodeIndex < encodeDataLen; len++, currEncodeIndex++) {
+            enbuffer[r + len] = data[currEncodeIndex];
+        }
+
+        textsize = len;
+        if (textsize == 0) {
+            return null;
+        }
+
+        for (i = 1; i <= F; i++) {
+            InsertNode(r - i);
+        }
+
+        InsertNode(r);
+
+        do {
+            if (match_length > len) {
+                match_length = len;
+            }
+
+            if (match_length <= THRESHOLD) {
+                match_length = 1;
+                code_buf[0] |= mask;
+                code_buf[code_buf_ptr++] = enbuffer[r];
+            } else {
+                code_buf[code_buf_ptr++] = (byte) (match_position & 0xFF);
+                code_buf[code_buf_ptr++] = (byte) (((match_position >>> 4) & 0xf0) | (match_length - (THRESHOLD + 1))); // >>>为不带符号的右移
+            }
+
+            // 状态标志flag只有一个字节，8bit
+            mask <<= 1;
+            if ((mask & 0xFF) == 0) {
+                for (i = 0; i < code_buf_ptr; i++) {
+                    resultBuffer.add(code_buf[i]);
+                }
+
+                codesize += code_buf_ptr;
+                code_buf[0] = 0;
+                code_buf_ptr = mask = 1;
+            }
+
+            last_match_length = match_length;
+
+            for (i = 0; i < last_match_length && currEncodeIndex < encodeDataLen; i++, currEncodeIndex++) {
+                DeleteNode(s);
+
+                c = data[currEncodeIndex];
+
+                enbuffer[s] = c;
+
+                if (s < F - 1) {
+                    enbuffer[s + N] = c;
+                }
+
+                s = (s + 1) & (N - 1);
+                r = (r + 1) & (N - 1);
+                InsertNode(r);
+            }
+
+            textsize += i;
+            if (textsize > printcount) {
+                printcount += 1024;
+            }
+
+            while (i++ < last_match_length) {
+                DeleteNode(s);
+                s = (s + 1) & (N - 1);
+                r = (r + 1) & (N - 1);
+                if (--len > 0) {
+                    InsertNode(r);
+                }
+            }
+        } while (len > 0);
+
+        if (code_buf_ptr > 1) {
+            for (i = 0; i < code_buf_ptr; i++) {
+                resultBuffer.add(code_buf[i]);
+            }
+            codesize += code_buf_ptr;
+        }
+
+        byte[] result = new byte[resultBuffer.size()];
+        for (i = 0; i < resultBuffer.size(); i++) {
+            result[i] = (byte) resultBuffer.get(i).intValue();
+        }
+
+        return result;
     }
     
     /**
@@ -166,6 +294,11 @@ public class LzssAlgorithm {
         byte[] resultByteData = lzssCompress(inputByteData);
         List<String> result = new ArrayList<>();
         result.addAll(byteArrayToHexList(resultByteData));
+
+        // Log compression stats
+        double ratio = (inputByteData.length > 0) ? (double) resultByteData.length / inputByteData.length * 100 : 0;
+        android.util.Log.d("LzssAlgorithm", "[LZSS] Input: " + inputByteData.length + " bytes, Output: " + resultByteData.length + " bytes, Ratio: " + String.format("%.1f%%", ratio));
+
         return result;
     }
     

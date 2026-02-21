@@ -1,6 +1,33 @@
-pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+pluginManagement {
+    includeBuild("../node_modules/@react-native/gradle-plugin")
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.id == "com.android.application" ||
+                requested.id.id == "com.android.library") {
+                useVersion("8.7.3")
+            }
+        }
+    }
+}
 plugins { id("com.facebook.react.settings") }
 extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+
+// Repository configuration - allow project repositories for React Native libraries
+dependencyResolutionManagement {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            // react-native-background-fetch
+            url = uri("${rootDir}/../node_modules/react-native-background-fetch/android/libs")
+        }
+        maven {
+            // react-native-background-geolocation
+            url = uri("${rootDir}/../node_modules/react-native-background-geolocation/android/libs")
+        }
+    }
+}
+
 rootProject.name = 'MobillDrivers'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')

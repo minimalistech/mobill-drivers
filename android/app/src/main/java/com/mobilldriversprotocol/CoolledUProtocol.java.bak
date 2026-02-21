@@ -1,0 +1,995 @@
+package com.mobilldriversprotocol;
+
+import android.util.Log;
+
+import com.mobilldriversprotocol.models.*;
+import com.mobilldriversprotocol.Crc32Algorithm;
+import com.mobilldriversprotocol.LzssAlgorithm;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+/**
+ * CoolledUProtocol - Protocol wrapper for CoolLEDU devices
+ * Implements the manufacturer's two-phase transmission protocol
+ *
+ * Protocol Flow:
+ * 1. Client sends beginDataForProgram (handshake with metadata)
+ * 2. Device responds with notification (status)
+ * 3. Client sends dataForProgram packets sequentially
+ * 4. Device responds after each packet with index and status
+ * 5. Repeat until all packets sent
+ *
+ * Copyright © 2024 Mobill. All rights reserved.
+ */
+public class CoolledUProtocol {
+
+    private static final String TAG = "CoolledUProtocol";
+
+    // BLE UUIDs for CoolLEDU devices
+    public static final String UUID_SERVICE = "0000fff0-0000-1000-8000-00805f9b34fb";
+    public static final String UUID_CHARACTER = "0000fff1-0000-1000-8000-00805f9b34fb";
+
+    // Protocol response codes
+    public static final int RESPONSE_SUCCESS = 0x00;
+    public static final int RESPONSE_TRANSMISSION_FAILED = 0x01;
+    public static final int RESPONSE_DEVICE_ERROR = 0x02;
+    public static final int RESPONSE_DATA_ERROR = 0x03;
+
+    /**
+     * DataResult - Contains begin packet and data packets for a program
+     */
+    public static class DataResult {
+        public List<String> beginDataForProgram;      // Initial handshake packet
+        public List<List<String>> dataForProgram;     // Array of data packets
+    }
+
+    /**
+     * Generate complete DataResult for a ColorItemModel32 program
+     *
+     * @param colorItemModel The program to transmit
+     * @param programIndex Program index in transmission sequence (0-8)
+     * @param programCount Total programs being sent (1-9)
+     * @return DataResult with begin and data packets
+     */
+    public static DataResult getDataResult(ColorItemModel32 colorItemModel, int programIndex, int programCount) {
+        DataResult dataResult = new DataResult();
+
+        Log.d(TAG, "[PROTOCOL] ===== GENERATING PROTOCOL DATA =====");
+        Log.d(TAG, "[PROTOCOL] programIndex: " + programIndex + ", programCount: " + programCount);
+
+        // 1. Generate program data (this is the UNCOMPRESSED data used for CRC and length in begin packet)
+        List<String> originalProgramData = getDataWithProgram(colorItemModel);
+        Log.d(TAG, "[PROTOCOL] 1. Original program data size: " + originalProgramData.size() + " bytes");
+
+        // 2. Create begin packet (handshake) - uses UNCOMPRESSED data for CRC and length
+        dataResult.beginDataForProgram = getStartDataForProgram(originalProgramData, programIndex, programCount);
+        Log.d(TAG, "[PROTOCOL] 2. Begin packet created, size: " + dataResult.beginDataForProgram.size() + " bytes");
+
+        // 3. Compress data using LZSS
+        List<String> compressedData = LzssAlgorithm.getLzssCompressData(originalProgramData);
+        Log.d(TAG, "[PROTOCOL] 3. Compressed data size: " + compressedData.size() + " bytes");
+
+        // 4. Split into packets - uses COMPRESSED data
+        dataResult.dataForProgram = getDataPacket(compressedData, "03");
+        Log.d(TAG, "[PROTOCOL] 4. Data packets created: " + dataResult.dataForProgram.size() + " packets");
+
+        Log.d(TAG, "[PROTOCOL] ===== END PROTOCOL DATA GENERATION =====");
+
+        return dataResult;
+    }
+
+    /**
+     * Generate program data from ColorItemModel32
+     * Format: [reserved 8 bytes][content count][show count][content data...]
+     */
+    private static List<String> getDataWithProgram(ColorItemModel32 colorItemModel) {
+        List<String> result = new ArrayList<>();
+
+        Log.d(TAG, "[DATA_GEN] ===== START ITEM CONTENT GENERATION =====");
+        Log.d(TAG, "[DATA_GEN] masterplateCaseType: " + colorItemModel.getMasterplateCaseType());
+        Log.d(TAG, "[DATA_GEN] itemContentCount: " + colorItemModel.getItemContentCount());
+        Log.d(TAG, "[DATA_GEN] itemShowTime: " + colorItemModel.getItemShowTime());
+        Log.d(TAG, "[DATA_GEN] deviceIdentify: " + colorItemModel.getItemDeviceIdentify());
+
+        // Reserved bytes
+        for (int i = 0; i < 8; i++) {
+            result.add("00");
+        }
+        Log.d(TAG, "[DATA_GEN] Added 8 reserved bytes, current length: " + result.size());
+
+        // Content count (how many content items in this program)
+        result.addAll(getHexListStringForWithOneByte(colorItemModel.getItemContentCount()));
+        Log.d(TAG, "[DATA_GEN] Added itemContentCount (" + colorItemModel.getItemContentCount() + "), current length: " + result.size());
+
+        // Show count (how many times to display this program)
+        result.addAll(getHexListStringForWithOneByte(colorItemModel.getItemShowTime()));
+        Log.d(TAG, "[DATA_GEN] Added itemShowTime (" + colorItemModel.getItemShowTime() + "), current length: " + result.size());
+
+        // Content data (graffiti, animation, text)
+        List<String> contentData = getDataForCombineProgram(colorItemModel);
+        result.addAll(contentData);
+        Log.d(TAG, "[DATA_GEN] Added content data, total length: " + result.size());
+
+        // Show first 100 chars of hex
+        StringBuilder hex = new StringBuilder();
+        for (int i = 0; i < Math.min(50, result.size()); i++) {
+            hex.append(result.get(i));
+        }
+        Log.d(TAG, "[DATA_GEN] First 100 chars: " + hex.toString());
+        Log.d(TAG, "[DATA_GEN] ===== END ITEM CONTENT GENERATION =====");
+
+        return result;
+    }
+
+    /**
+     * Generate content data from ColorItemModel32
+     * Routes to graffiti, animation, or text generator based on content type
+     */
+    private static List<String> getDataForCombineProgram(ColorItemModel32 colorItemModel) {
+        List<String> result = new ArrayList<>();
+
+        // Graffiti (images)
+        if (colorItemModel.getGraffitiModel32Arr() != null && !colorItemModel.getGraffitiModel32Arr().isEmpty()) {
+            for (GraffitiModel32 graffiti : colorItemModel.getGraffitiModel32Arr()) {
+                result.addAll(getDataWithGraffitiContent(graffiti));
+            }
+        }
+
+        // Animations
+        if (colorItemModel.getAnimationModel32Arr() != null && !colorItemModel.getAnimationModel32Arr().isEmpty()) {
+            for (AnimationModel32 animation : colorItemModel.getAnimationModel32Arr()) {
+                result.addAll(getDataWithAnimationContent(animation));
+            }
+        }
+
+        // Text
+        if (colorItemModel.getColorTextModel32Arr() != null && !colorItemModel.getColorTextModel32Arr().isEmpty()) {
+            for (ColorTextModel32 text : colorItemModel.getColorTextModel32Arr()) {
+                // When colorShowType=1, iOS sends custom color block (type 06) BEFORE text bitmap (type 01)
+                // See iOS JTTool.m lines 2210-2231
+                if (text.getColorShowType() == 1) {
+                    result.addAll(getDataWithCustomColorContent(text));
+                }
+                result.addAll(getDataWithTextContent(text));
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Generate graffiti/image content data
+     */
+    private static List<String> getDataWithGraffitiContent(GraffitiModel32 graffiti) {
+        // Build content data first (without total length prefix)
+        List<String> contentData = new ArrayList<>();
+
+        // Content type identifier - FIXED: Use "02" for graffiti (was "01")
+        contentData.add("02");
+
+        // 7 reserved bytes (matching iOS implementation)
+        for (int i = 0; i < 7; i++) {
+            contentData.add("00");
+        }
+
+        // Position and size - LOG VALUES FOR DEBUGGING
+        Log.d(TAG, "[GRAFFITI_DATA] coverTypeGraffiti: " + graffiti.getCoverTypeGraffiti());
+        Log.d(TAG, "[GRAFFITI_DATA] startColGraffiti: " + graffiti.getStartColGraffiti());
+        Log.d(TAG, "[GRAFFITI_DATA] startRowGraffiti: " + graffiti.getStartRowGraffiti());
+        Log.d(TAG, "[GRAFFITI_DATA] widthDataGraffiti: " + graffiti.getWidthDataGraffiti());
+        Log.d(TAG, "[GRAFFITI_DATA] heightDataGraffiti: " + graffiti.getHeightDataGraffiti());
+
+        contentData.add(getHexStringForIntWithOneByte(graffiti.getCoverTypeGraffiti()));
+        contentData.addAll(getHexListStringForIntWithTwo(graffiti.getStartColGraffiti()));
+        contentData.addAll(getHexListStringForIntWithTwo(graffiti.getStartRowGraffiti()));
+        contentData.addAll(getHexListStringForIntWithTwo(graffiti.getWidthDataGraffiti()));
+        contentData.addAll(getHexListStringForIntWithTwo(graffiti.getHeightDataGraffiti()));
+
+        // Display parameters
+        contentData.add(getHexStringForIntWithOneByte(graffiti.getShowModelGraffiti()));
+        // FIXED: Add +239 offset to speed (iOS: "+239解决速度变化非线性")
+        contentData.add(getHexStringForIntWithOneByte(graffiti.getSpeedDataGraffiti() + 239));
+        contentData.add(getHexStringForIntWithOneByte(graffiti.getStayTimeGraffiti()));
+
+        // FIXED: Use compressed 4-bit color encoding (2 bytes per pixel, not 3)
+        List<String> pixelData = convertPixelDataToHexListCompressed(graffiti.getDataGraffiti());
+
+        // FIXED: Add 4-byte pixel data length field before pixel data
+        contentData.addAll(getHexListStringForIntWithFour(pixelData.size()));
+        contentData.addAll(pixelData);
+
+        // FIXED: Prepend 4-byte total length (content size + 4 bytes for this length field)
+        List<String> result = new ArrayList<>();
+        result.addAll(getHexListStringForIntWithFour(contentData.size() + 4));
+        result.addAll(contentData);
+
+        // ENHANCED LOGGING: Show exact graffiti structure for debugging
+        Log.d(TAG, "[GRAFFITI_BYTES] ===== GRAFFITI CONTENT STRUCTURE =====");
+        Log.d(TAG, "[GRAFFITI_BYTES] Total size with 4-byte prefix: " + result.size() + " bytes");
+        Log.d(TAG, "[GRAFFITI_BYTES] Content size (without prefix): " + contentData.size() + " bytes");
+        Log.d(TAG, "[GRAFFITI_BYTES] Pixel data size: " + pixelData.size() + " bytes");
+
+        // Show first 50 bytes in detail
+        StringBuilder detailedHex = new StringBuilder();
+        for (int i = 0; i < Math.min(50, result.size()); i++) {
+            detailedHex.append(result.get(i)).append(" ");
+            if ((i + 1) % 16 == 0) detailedHex.append("\n[GRAFFITI_BYTES]                    ");
+        }
+        Log.d(TAG, "[GRAFFITI_BYTES] First 50 bytes:\n[GRAFFITI_BYTES]                    " + detailedHex.toString());
+
+        // Parse and show structure
+        int pos = 0;
+        Log.d(TAG, "[GRAFFITI_BYTES] Byte 0-3 (4-byte length): " + result.get(0) + " " + result.get(1) + " " + result.get(2) + " " + result.get(3) + " = " + (contentData.size() + 4) + " bytes");
+        pos = 4;
+        Log.d(TAG, "[GRAFFITI_BYTES] Byte 4 (type): " + result.get(pos) + " (should be 02 for graffiti)");
+        pos++;
+        Log.d(TAG, "[GRAFFITI_BYTES] Bytes 5-11 (7 reserved): " + result.get(5) + " " + result.get(6) + " " + result.get(7) + " " + result.get(8) + " " + result.get(9) + " " + result.get(10) + " " + result.get(11));
+        pos = 12;
+        Log.d(TAG, "[GRAFFITI_BYTES] Byte 12 (coverType): " + result.get(pos));
+        Log.d(TAG, "[GRAFFITI_BYTES] Bytes 13-14 (startCol): " + result.get(13) + " " + result.get(14) + " = " + graffiti.getStartColGraffiti());
+        Log.d(TAG, "[GRAFFITI_BYTES] Bytes 15-16 (startRow): " + result.get(15) + " " + result.get(16) + " = " + graffiti.getStartRowGraffiti());
+        Log.d(TAG, "[GRAFFITI_BYTES] Bytes 17-18 (width): " + result.get(17) + " " + result.get(18) + " = " + graffiti.getWidthDataGraffiti());
+        Log.d(TAG, "[GRAFFITI_BYTES] Bytes 19-20 (height): " + result.get(19) + " " + result.get(20) + " = " + graffiti.getHeightDataGraffiti());
+        Log.d(TAG, "[GRAFFITI_BYTES] Byte 21 (showModel): " + result.get(21) + " = " + graffiti.getShowModelGraffiti());
+        Log.d(TAG, "[GRAFFITI_BYTES] Byte 22 (speed+239): " + result.get(22) + " = " + (graffiti.getSpeedDataGraffiti() + 239));
+        Log.d(TAG, "[GRAFFITI_BYTES] Byte 23 (stayTime): " + result.get(23) + " = " + graffiti.getStayTimeGraffiti());
+        Log.d(TAG, "[GRAFFITI_BYTES] Bytes 24-27 (pixel length): " + result.get(24) + " " + result.get(25) + " " + result.get(26) + " " + result.get(27) + " = " + pixelData.size() + " bytes");
+        Log.d(TAG, "[GRAFFITI_BYTES] Bytes 28+ (pixel data): " + result.get(28) + " " + result.get(29) + " " + result.get(30) + " " + result.get(31) + " " + result.get(32) + " " + result.get(33) + "...");
+        Log.d(TAG, "[GRAFFITI_BYTES] ===== END GRAFFITI STRUCTURE =====");
+
+        return result;
+    }
+
+    /**
+     * Generate animation content data
+     * Structure matches iOS JTTool.m getAnimationContent (lines 1339-1411)
+     */
+    private static List<String> getDataWithAnimationContent(AnimationModel32 animation) {
+        // Build content data first (without total length prefix)
+        List<String> contentData = new ArrayList<>();
+
+        // 1. Content type identifier - "03" for animation (iOS line 1344)
+        contentData.add("03");
+
+        // 2. 7 reserved bytes (iOS lines 1347-1349)
+        for (int i = 0; i < 7; i++) {
+            contentData.add("00");
+        }
+
+        // 3. Cover type - 1 byte (iOS line 1352)
+        contentData.add(getHexStringForIntWithOneByte(animation.getCoverTypeAnimation()));
+
+        // 4. Start column - 2 bytes (iOS line 1355) - Note: iOS uses %04x for 2-byte values
+        contentData.addAll(getHexListStringForIntWithTwo(animation.getStartColAnimation()));
+
+        // 5. Start row - 2 bytes (iOS line 1358)
+        contentData.addAll(getHexListStringForIntWithTwo(animation.getStartRowAnimation()));
+
+        // 6. Width - 2 bytes (iOS line 1361)
+        contentData.addAll(getHexListStringForIntWithTwo(animation.getWidthDataAnimation()));
+
+        // 7. Height - 2 bytes (iOS line 1364)
+        contentData.addAll(getHexListStringForIntWithTwo(animation.getHeightDataAnimation()));
+
+        // 8. 1 reserved byte (iOS line 1367)
+        contentData.add("00");
+
+        // For CoolLEDU (non-CoolLEDMX/CoolLEDUX), use standard format (iOS lines 1390-1401)
+        // 9. Time interval - 2 bytes (iOS line 1393)
+        contentData.addAll(getHexListStringForIntWithTwo(animation.getTimeIntervalAnimation()));
+
+        // Convert pixel data to hex string for length calculation
+        // Use compressed pixel data format (same as graffiti)
+        List<String> pixelData = new ArrayList<>();
+        if (animation.getDataAnimation() != null) {
+            for (List<List<List<Float>>> frameData : animation.getDataAnimation()) {
+                pixelData.addAll(convertPixelDataToHexListCompressed(frameData));
+            }
+        }
+
+        // 10. Pixel data total length - 4 bytes (iOS lines 1396-1399)
+        int charsTotalLength = pixelData.size();
+        contentData.addAll(getHexListStringForIntWithFour(charsTotalLength));
+
+        // 11. Pixel data (iOS line 1404)
+        contentData.addAll(pixelData);
+
+        // 0. Prepend 4-byte total length (content size + 4 bytes for this length field)
+        // iOS lines 1406-1408: "0.拼接4个字节该段内容所有数据的总长度"
+        List<String> result = new ArrayList<>();
+        result.addAll(getHexListStringForIntWithFour(contentData.size() + 4));
+        result.addAll(contentData);
+
+        Log.d(TAG, "[ANIMATION_DATA] Total size with 4-byte prefix: " + result.size() + " bytes");
+        Log.d(TAG, "[ANIMATION_DATA] Content size (without prefix): " + contentData.size() + " bytes");
+        Log.d(TAG, "[ANIMATION_DATA] Pixel data size: " + pixelData.size() + " bytes");
+        Log.d(TAG, "[ANIMATION_DATA] Frame count: " + (animation.getDataAnimation() != null ? animation.getDataAnimation().size() : 0));
+
+        return result;
+    }
+
+    /**
+     * Generate text content data
+     * NOTE: iOS sends text as type "01" (bitmap/graffiti format), NOT type "03"
+     * The device firmware only understands bitmap format for CoolLEDU
+     * Structure matches iOS JTTool.m getItemWordContent (lines 662-772)
+     */
+    private static List<String> getDataWithTextContent(ColorTextModel32 text) {
+        List<String> result = new ArrayList<>();
+
+        // 1. Content type identifier - "01" for bitmap format (matches iOS line 665)
+        result.add("01");
+
+        // 2. 7 reserved bytes (matches iOS lines 667-669)
+        for (int i = 0; i < 7; i++) {
+            result.add("00");
+        }
+
+        // 3. Cover type - 1 byte (matches iOS line 673)
+        result.add(getHexStringForIntWithOneByte(text.getCoverType()));
+
+        // 4. Start column - 2 bytes (matches iOS line 676)
+        result.addAll(getHexListStringForIntWithTwo(text.getStartCol()));
+
+        // 5. Start row - 2 bytes (matches iOS line 679)
+        result.addAll(getHexListStringForIntWithTwo(text.getStartRow()));
+
+        // 6. Width - 2 bytes (matches iOS line 682)
+        result.addAll(getHexListStringForIntWithTwo(text.getWidthData()));
+
+        // 7. Height - 2 bytes (matches iOS line 685)
+        result.addAll(getHexListStringForIntWithTwo(text.getHeightData()));
+
+        // 8. Show model - 1 byte (matches iOS line 688)
+        result.add(getHexStringForIntWithOneByte(text.getShowModel()));
+
+        // 9. Speed data - 1 byte (matches iOS line 692)
+        result.add(getHexStringForIntWithOneByte(text.getSpeedData()));
+
+        // 10. Stay time - 1 byte (matches iOS line 695)
+        result.add(getHexStringForIntWithOneByte(text.getStayTime()));
+
+        // 11. 4 bytes - bitmap data total length (matches iOS line 763)
+        // 12. Bitmap data (matches iOS line 766)
+        // TODO: Need to convert text to bitmap like iOS generateDataFromImageFont
+        // For now, create minimal bitmap data for testing
+        String bitmapData = generateMinimalBitmapDataForText(text);
+        int bitmapLength = bitmapData.length() / 2; // Divide by 2 because each byte is 2 hex chars
+
+        result.addAll(getHexListStringForIntWithFour(bitmapLength));
+
+        // Append bitmap data as hex string
+        for (int i = 0; i < bitmapData.length(); i += 2) {
+            result.add(bitmapData.substring(i, Math.min(i + 2, bitmapData.length())));
+        }
+
+        return result;
+    }
+
+    /**
+     * Generate minimal bitmap data for text
+     * This is a placeholder - iOS uses generateDataFromImageFont which converts
+     * text to actual bitmap pixels. For now, generate visible test pattern.
+     */
+    private static String generateMinimalBitmapDataForText(ColorTextModel32 text) {
+        // For display, each column is (height / 4) bytes (4 bits per pixel - 2-bit RGB)
+        // 16-row display = 4 bytes per column
+        // 32-row display = 8 bytes per column
+        StringBuilder bitmap = new StringBuilder();
+
+        int width = text.getWidthData(); // Use full display width
+        int height = text.getHeightData(); // Get actual height from text model
+        int bytesPerCol = height / 4; // 4 pixels per byte (2-bit per color channel)
+
+        Log.d(TAG, "[BITMAP] Display size: " + width + "x" + height + ", bytesPerCol=" + bytesPerCol);
+
+        // Create alternating vertical bars pattern for visibility
+        for (int col = 0; col < width; col++) {
+            // Alternate between white (ff) and red (f0) columns
+            String pattern = (col % 4 < 2) ? "ff" : "f0";
+
+            for (int byteIdx = 0; byteIdx < bytesPerCol; byteIdx++) {
+                bitmap.append(pattern);
+            }
+        }
+
+        Log.d(TAG, "[BITMAP] Generated test pattern: " + width + " cols × " + height + " rows = " + (width * bytesPerCol) + " bytes");
+        return bitmap.toString();
+    }
+
+    /**
+     * Generate custom color content data (type 06)
+     * Matches iOS JTTool.m getItemCustomColorContent (lines 985-1046)
+     * This block is sent BEFORE the text bitmap block when colorShowType=1
+     */
+    private static List<String> getDataWithCustomColorContent(ColorTextModel32 text) {
+        List<String> result = new ArrayList<>();
+
+        Log.d(TAG, "[CUSTOM_COLOR] Input: startCol=" + text.getStartCol() +
+                   ", startRow=" + text.getStartRow() +
+                   ", width=" + text.getWidthData() +
+                   ", height=" + text.getHeightData() +
+                   ", movespace=" + text.getMovespace());
+
+        // Calculate word count and placeholder data for wordsWidth/wordsColor
+        int wordCount = (text.getTextItems() != null) ? text.getTextItems().size() : 0;
+
+        // For each character, assume a placeholder width (e.g., 8 pixels)
+        // This is a simplification - iOS calculates actual rendered width
+        int charWidth = 8;
+        int wordsLength = wordCount * charWidth;
+
+        // Generate wordsWidth: 2 bytes per character specifying its width
+        StringBuilder wordsWidth = new StringBuilder();
+        for (int i = 0; i < wordCount; i++) {
+            wordsWidth.append(String.format("%04x", charWidth));
+        }
+
+        // Generate wordsColor: 2 bytes per character specifying its color
+        // Use the color from textItems if available, otherwise use white (ff)
+        StringBuilder wordsColor = new StringBuilder();
+        if (text.getTextItems() != null) {
+            for (HLColorTextItem item : text.getTextItems()) {
+                String color = (item.getRgbString() != null && !item.getRgbString().isEmpty())
+                    ? item.getRgbString().substring(0, Math.min(2, item.getRgbString().length()))
+                    : "ff";
+                wordsColor.append(String.format("%02x", Integer.parseInt(color, 16)));
+            }
+        }
+
+        // Build custom color block structure (matches iOS lines 991-1040)
+
+        // 1. Content type identifier (line 994)
+        result.add("06");
+
+        // 2. 5 reserved bytes (lines 997-999)
+        for (int i = 0; i < 5; i++) {
+            result.add("00");
+        }
+
+        // 2.1 Move spacing - 2 bytes (line 1002)
+        List<String> movespaceHex = getHexListStringForIntWithTwo(text.getMovespace());
+        result.addAll(movespaceHex);
+        Log.d(TAG, "[CUSTOM_COLOR] movespace=" + text.getMovespace() + " → " + String.join("", movespaceHex) + ", result size=" + result.size());
+
+        // 3. Start column - 2 bytes (line 1005)
+        List<String> startColHex = getHexListStringForIntWithTwo(text.getStartCol());
+        result.addAll(startColHex);
+        Log.d(TAG, "[CUSTOM_COLOR] startCol=" + text.getStartCol() + " → " + String.join("", startColHex) + ", result size=" + result.size());
+
+        // 4. Start row - 2 bytes (line 1008)
+        List<String> startRowHex = getHexListStringForIntWithTwo(text.getStartRow());
+        result.addAll(startRowHex);
+        Log.d(TAG, "[CUSTOM_COLOR] startRow=" + text.getStartRow() + " → " + String.join("", startRowHex) + ", result size=" + result.size());
+
+        // 5. Width - 2 bytes (line 1011)
+        List<String> widthHex = getHexListStringForIntWithTwo(text.getWidthData());
+        result.addAll(widthHex);
+        Log.d(TAG, "[CUSTOM_COLOR] width=" + text.getWidthData() + " → " + String.join("", widthHex) + ", result size=" + result.size());
+
+        // 6. Height - 2 bytes (line 1014)
+        List<String> heightHex = getHexListStringForIntWithTwo(text.getHeightData());
+        result.addAll(heightHex);
+        Log.d(TAG, "[CUSTOM_COLOR] height=" + text.getHeightData() + " → " + String.join("", heightHex) + ", result size=" + result.size());
+
+        // DEBUG: Print result list up to this point
+        StringBuilder debugHex = new StringBuilder();
+        for (int i = 0; i < Math.min(25, result.size()); i++) {
+            debugHex.append(result.get(i)).append(" ");
+        }
+        Log.d(TAG, "[CUSTOM_COLOR] Result bytes after position params: " + debugHex.toString());
+
+        // 7. Show model - 1 byte (line 1017)
+        result.add(getHexStringForIntWithOneByte(text.getShowModel()));
+
+        // 8. Speed data - 1 byte (line 1021)
+        result.add(getHexStringForIntWithOneByte(text.getSpeedData()));
+
+        // 9. Stay time - 1 byte (line 1024)
+        result.add(getHexStringForIntWithOneByte(text.getStayTime()));
+
+        // 10. Reserved - 1 byte (line 1027)
+        result.add("00");
+
+        // 11. Word count - 2 bytes (line 1030)
+        result.addAll(getHexListStringForIntWithTwo(wordCount));
+
+        // 12. Total words length - 2 bytes (line 1034)
+        result.addAll(getHexListStringForIntWithTwo(wordsLength));
+
+        // 13. Words width data - n bytes (line 1037)
+        for (int i = 0; i < wordsWidth.length(); i += 2) {
+            result.add(wordsWidth.substring(i, Math.min(i + 2, wordsWidth.length())));
+        }
+
+        // 14. Words color data - n bytes (line 1040)
+        for (int i = 0; i < wordsColor.length(); i += 2) {
+            result.add(wordsColor.substring(i, Math.min(i + 2, wordsColor.length())));
+        }
+
+        // 0. Prepend total length - 4 bytes (lines 1042-1044)
+        int totalLength = result.size() + 4; // +4 for the length field itself
+        List<String> finalResult = new ArrayList<>();
+        finalResult.addAll(getHexListStringForIntWithFour(totalLength));
+        finalResult.addAll(result);
+
+        Log.d(TAG, "[CUSTOM_COLOR] Generated type 06 block: wordCount=" + wordCount + ", wordsLength=" + wordsLength + ", totalLength=" + totalLength);
+        return finalResult;
+    }
+
+    /**
+     * Generate data for individual text character
+     */
+    private static List<String> getDataForTextItem(HLColorTextItem item) {
+        List<String> result = new ArrayList<>();
+
+        // Item type
+        result.add(getHexStringForIntWithOneByte(item.getItemType()));
+
+        // Text character (UTF-8 bytes)
+        if (item.getText() != null) {
+            byte[] textBytes = item.getText().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            result.add(getHexStringForIntWithOneByte(textBytes.length));
+            for (byte b : textBytes) {
+                result.add(String.format("%02x", b & 0xFF));
+            }
+        } else {
+            result.add("00");
+        }
+
+        // RGB color
+        if (item.getRgbString() != null) {
+            String[] rgb = item.getRgbString().split(",");
+            result.add(String.format("%02x", Integer.parseInt(rgb[0])));
+            result.add(String.format("%02x", Integer.parseInt(rgb[1])));
+            result.add(String.format("%02x", Integer.parseInt(rgb[2])));
+        } else {
+            result.add("ff");
+            result.add("ff");
+            result.add("ff");
+        }
+
+        // Language type
+        result.add(getHexStringForIntWithOneByte(item.getLanguageType()));
+
+        return result;
+    }
+
+    /**
+     * Convert pixel data [column][row][rgb] to hex string list
+     * RGB values are 0.0-1.0 floats, converted to 0-255 integers
+     */
+    private static List<String> convertPixelDataToHexList(List<List<List<Float>>> pixelData) {
+        List<String> result = new ArrayList<>();
+
+        if (pixelData == null || pixelData.isEmpty()) {
+            return result;
+        }
+
+        // Column-major order: for each column, for each row, R G B
+        for (List<List<Float>> columnData : pixelData) {
+            for (List<Float> pixelRgb : columnData) {
+                if (pixelRgb != null && pixelRgb.size() >= 3) {
+                    int r = (int) (pixelRgb.get(0) * 255.0f);
+                    int g = (int) (pixelRgb.get(1) * 255.0f);
+                    int b = (int) (pixelRgb.get(2) * 255.0f);
+                    result.add(String.format("%02x", r));
+                    result.add(String.format("%02x", g));
+                    result.add(String.format("%02x", b));
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Convert float color value (0.0-1.0) to 4-bit value (0-15)
+     * Matches iOS HLUtils colorExchangeFloat implementation
+     * iOS comment: "+239解决速度变化非线性，前期滑动速度不明显"
+     */
+    private static int colorExchangeFloat(float colorValue) {
+        float convertedValue = colorValue * 255;
+        int trueValue;
+
+        if (convertedValue >= 238) {
+            trueValue = 15;  // Max brightness
+        } else if (convertedValue <= 30) {
+            trueValue = 0;   // Min brightness
+        } else {
+            trueValue = (int)((convertedValue - 30) / 15) + 1;
+        }
+
+        return trueValue;
+    }
+
+    /**
+     * Convert pixel data to COMPRESSED hex format (2 bytes per pixel) for graffiti
+     * Format: [R:4bit in 8bit][G:4bit|B:4bit]
+     * This matches iOS implementation for CoolLEDU devices
+     */
+    private static List<String> convertPixelDataToHexListCompressed(List<List<List<Float>>> pixelData) {
+        List<String> result = new ArrayList<>();
+
+        if (pixelData == null || pixelData.isEmpty()) {
+            return result;
+        }
+
+        // Column-major order: for each column, for each row
+        for (List<List<Float>> columnData : pixelData) {
+            for (List<Float> pixelRgb : columnData) {
+                if (pixelRgb != null && pixelRgb.size() >= 3) {
+                    int r = colorExchangeFloat(pixelRgb.get(0));
+                    int g = colorExchangeFloat(pixelRgb.get(1));
+                    int b = colorExchangeFloat(pixelRgb.get(2));
+
+                    // First byte: R (4-bit value in 8-bit byte)
+                    result.add(String.format("%02x", r));
+
+                    // Second byte: G (high 4 bits) + B (low 4 bits)
+                    result.add(String.format("%02x", (g << 4) | b));
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Generate begin packet (initial handshake)
+     * Format: [02][CRC 4B][length 4B][index 1B][count 1B]
+     * iOS: 000B 02 <CRC8hex> <LENGTH8hex> <INDEX2hex> <COUNT2hex>
+     */
+    private static List<String> getStartDataForProgram(List<String> programData, int index, int count) {
+        List<String> result = new ArrayList<>();
+
+        // Command byte
+        result.add("02");
+
+        // CRC32 checksum (4 bytes) - calculated on UNCOMPRESSED data
+        List<String> crcBytes = getCrcCode(programData);
+        result.addAll(crcBytes);
+
+        // Data length (4 bytes) - UNCOMPRESSED data length
+        List<String> lengthBytes = getHexListStringForIntWithFourByte(programData);
+        result.addAll(lengthBytes);
+
+        // Program index (1 byte)
+        result.add(getHexStringForIntWithOneByte(index));
+
+        // Total program count (1 byte)
+        result.add(getHexStringForIntWithOneByte(count));
+
+        // DEBUG: Log the begin packet structure BEFORE framing
+        Log.d(TAG, "[BEGIN_PACKET] ===== BEGIN PACKET STRUCTURE (before framing) =====");
+        Log.d(TAG, "[BEGIN_PACKET] programData size: " + programData.size() + " bytes");
+        Log.d(TAG, "[BEGIN_PACKET] CRC32: " + String.join("", crcBytes) + " (4 bytes)");
+        Log.d(TAG, "[BEGIN_PACKET] Length: " + String.join("", lengthBytes) + " = " + programData.size() + " bytes");
+        Log.d(TAG, "[BEGIN_PACKET] Index: " + getHexStringForIntWithOneByte(index));
+        Log.d(TAG, "[BEGIN_PACKET] Count: " + getHexStringForIntWithOneByte(count));
+        Log.d(TAG, "[BEGIN_PACKET] Raw packet (11 bytes): " + String.join(" ", result));
+        Log.d(TAG, "[BEGIN_PACKET] ===== END BEGIN PACKET STRUCTURE =====");
+
+        // Add framing (0x01 start, length, escaped data, 0x03 end)
+        List<String> framedPacket = getSendDataWithInfo(result);
+
+        Log.d(TAG, "[BEGIN_PACKET] Framed packet: " + String.join(" ", framedPacket));
+
+        return framedPacket;
+    }
+
+    /**
+     * Split data into packets and add protocol headers
+     * Each packet: [type][reserved][total length 4B][index 2B][chunk size 2B][data...][checksum]
+     * Max packet size: 1024 bytes of data
+     * iOS format: [length 2B] [type] [00] [totalLen 4B] [index 2B] [chunkLen 2B] [data] [xor checksum 1B]
+     */
+    private static List<List<String>> getDataPacket(List<String> inputData, String type) {
+        List<List<String>> result = new ArrayList<>();
+
+        // Split into 1024-byte chunks (matching iOS fontsType:32)
+        int maxChunkSize = 1024;
+        int totalSize = inputData.size();
+        int packetCount = (int) Math.ceil((double) totalSize / maxChunkSize);
+
+        Log.d(TAG, "[DATA_PACKET] ===== DATA PACKET GENERATION =====");
+        Log.d(TAG, "[DATA_PACKET] Compressed data size: " + totalSize + " bytes");
+        Log.d(TAG, "[DATA_PACKET] Chunk size: " + maxChunkSize + ", Total packets: " + packetCount);
+
+        for (int i = 0; i < packetCount; i++) {
+            int start = i * maxChunkSize;
+            int end = Math.min(start + maxChunkSize, totalSize);
+            List<String> chunk = inputData.subList(start, end);
+
+            List<String> packet = new ArrayList<>();
+            packet.add("00");  // Reserved
+
+            // Total data length (4 bytes)
+            packet.addAll(getHexListStringForIntWithFourByte(inputData));
+
+            // Packet index (2 bytes)
+            packet.addAll(getHexListStringForIntWithTwo(i));
+
+            // Chunk size (2 bytes)
+            packet.addAll(getHexListStringForIntWithTwo(chunk.size()));
+
+            // Chunk data
+            packet.addAll(chunk);
+
+            // Checksum (XOR of all bytes, 1 byte)
+            List<String> checksum = convertEnd(packet);
+            packet.addAll(checksum);
+
+            // Add type byte and framing
+            List<String> finalPacket = new ArrayList<>();
+            finalPacket.add(type);
+            finalPacket.addAll(packet);
+
+            // Log packet structure for first packet
+            if (i == 0) {
+                Log.d(TAG, "[DATA_PACKET] Packet " + i + " structure (before framing):");
+                Log.d(TAG, "[DATA_PACKET]   Type: " + type);
+                Log.d(TAG, "[DATA_PACKET]   Reserved: 00");
+                Log.d(TAG, "[DATA_PACKET]   Total length: " + String.join("", getHexListStringForIntWithFourByte(inputData)) + " = " + totalSize);
+                Log.d(TAG, "[DATA_PACKET]   Index: " + String.join("", getHexListStringForIntWithTwo(i)));
+                Log.d(TAG, "[DATA_PACKET]   Chunk size: " + String.join("", getHexListStringForIntWithTwo(chunk.size())) + " = " + chunk.size());
+                Log.d(TAG, "[DATA_PACKET]   XOR Checksum: " + checksum.get(0));
+                // Show first 20 bytes of chunk data
+                StringBuilder chunkHex = new StringBuilder();
+                for (int j = 0; j < Math.min(20, chunk.size()); j++) {
+                    chunkHex.append(chunk.get(j)).append(" ");
+                }
+                Log.d(TAG, "[DATA_PACKET]   Chunk data (first 20 bytes): " + chunkHex.toString());
+            }
+
+            result.add(getSendDataWithInfo(finalPacket));
+        }
+
+        Log.d(TAG, "[DATA_PACKET] ===== END DATA PACKET GENERATION =====");
+
+        return result;
+    }
+
+    /**
+     * Add protocol framing: [0x01][escaped(length + data)][0x03]
+     * CRITICAL FIX: Length bytes MUST be escaped together with data!
+     * Manufacturer code escapes [length + data] as a unit, not separately.
+     */
+    private static List<String> getSendDataWithInfo(List<String> data) {
+        List<String> result = new ArrayList<>();
+
+        // Start byte
+        result.add("01");
+
+        // Combine length + data, then escape BOTH together (matches manufacturer implementation)
+        List<String> tempResult = new ArrayList<>();
+        tempResult.addAll(getDataStringLength(data));  // Length (2 bytes) - unescaped original data length
+        tempResult.addAll(data);                        // Data bytes
+        result.addAll(convertData(tempResult, 0));      // Escape the combined length+data
+
+        // End byte
+        result.add("03");
+
+        return result;
+    }
+
+    /**
+     * Escape data bytes: 0x01-0x03 become [0x02, byte^0x04]
+     */
+    private static List<String> convertData(List<String> data, int index) {
+        List<String> result = new ArrayList<>();
+
+        for (String hexStr : data) {
+            int value = Integer.parseInt(hexStr, 16);
+
+            if (value >= 0x01 && value <= 0x03) {
+                // Escape: add 0x02 prefix and XOR with 0x04
+                result.add("02");
+                result.add(String.format("%02x", value ^ 0x04));
+            } else {
+                result.add(hexStr);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Calculate length of data after escaping
+     */
+    private static List<String> getDataStringLength(List<String> data) {
+        // iOS returns the UNESCAPED data length, not the escaped length
+        // The length field represents the original data size before escaping
+        int length = data.size();
+        return getHexListStringForIntWithTwo(length);
+    }
+
+    /**
+     * Calculate CRC32 checksum (4 bytes)
+     */
+    public static List<String> getCrcCode(List<String> data) {
+        byte[] bytes = new byte[data.size()];
+        for (int i = 0; i < data.size(); i++) {
+            bytes[i] = (byte) Integer.parseInt(data.get(i), 16);
+        }
+
+        int crc = Crc32Algorithm.getCrc32CheckCode(bytes);
+
+        // Return 4 bytes (full CRC32 - matches iOS %08x format)
+        List<String> result = new ArrayList<>();
+        result.add(String.format("%02x", (crc >> 24) & 0xFF));
+        result.add(String.format("%02x", (crc >> 16) & 0xFF));
+        result.add(String.format("%02x", (crc >> 8) & 0xFF));
+        result.add(String.format("%02x", crc & 0xFF));
+        return result;
+    }
+
+    /**
+     * Generate display toggle command with simple escaping (NO LZSS compression)
+     * iOS: raw "00020501" becomes "0100020605020503" after escaping+framing
+     * Unlike program data, simple commands use direct escaping without LZSS
+     * @param rawCommand Raw command bytes [length 2B][command 05][value]
+     * @return Framed command ready to send via BLE
+     */
+    public static List<String> getDisplayToggleCommand(List<String> rawCommand) {
+        // Simple framing with escaping: [0x01][escaped data][0x03]
+        // Escape bytes 0x01-0x03: prepend 0x02 and XOR with 0x04
+        List<String> result = new ArrayList<>();
+        result.add("01");  // Start byte
+
+        // Escape each byte in rawCommand
+        for (String hexStr : rawCommand) {
+            int value = Integer.parseInt(hexStr, 16);
+            if (value >= 0x01 && value <= 0x03) {
+                // Escape: add 0x02 prefix and XOR with 0x04
+                result.add("02");
+                result.add(String.format("%02x", value ^ 0x04));
+            } else {
+                result.add(hexStr);
+            }
+        }
+
+        result.add("03");  // End byte
+        return result;
+    }
+
+    /**
+     * Calculate checksum (XOR of all bytes, 1 byte)
+     * Mirrors iOS verifyStringWith implementation
+     */
+    private static List<String> convertEnd(List<String> data) {
+        // Calculate XOR checksum (matches iOS verifyStringWith implementation)
+        int xorResult = 0;
+        for (String hexStr : data) {
+            xorResult ^= Integer.parseInt(hexStr, 16);
+        }
+        // Return as single byte (iOS returns %02x)
+        return Arrays.asList(String.format("%02x", xorResult & 0xFF));
+    }
+
+    // Hex conversion utilities
+    private static String getHexStringForIntWithOneByte(int value) {
+        return String.format("%02x", value & 0xFF);
+    }
+
+    private static List<String> getHexListStringForWithOneByte(int value) {
+        return Arrays.asList(getHexStringForIntWithOneByte(value));
+    }
+
+    private static List<String> getHexListStringForIntWithTwo(int value) {
+        List<String> result = new ArrayList<>();
+        result.add(String.format("%02x", (value >> 8) & 0xFF));
+        result.add(String.format("%02x", value & 0xFF));
+        return result;
+    }
+
+    private static List<String> getHexListStringForIntWithFour(int value) {
+        List<String> result = new ArrayList<>();
+        // Big-endian byte order (matches iOS %08x format)
+        result.add(String.format("%02x", (value >> 24) & 0xFF));  // Most significant byte first
+        result.add(String.format("%02x", (value >> 16) & 0xFF));
+        result.add(String.format("%02x", (value >> 8) & 0xFF));
+        result.add(String.format("%02x", value & 0xFF));          // Least significant byte last
+        return result;
+    }
+
+    private static List<String> getHexListStringForIntWithFourByte(List<String> data) {
+        int length = data.size();
+        return getHexListStringForIntWithFour(length);
+    }
+
+    /**
+     * Parse notification response
+     * Format: [type][reserved][index 2B][response code]
+     */
+    public static class NotificationResponse {
+        public int type;
+        public int packetIndex;
+        public int responseCode;
+
+        public boolean isSuccess() {
+            return responseCode == RESPONSE_SUCCESS;
+        }
+    }
+
+    /**
+     * Parse BLE notification data
+     */
+    public static NotificationResponse parseNotificationResponse(byte[] data) {
+        if (data == null || data.length < 5) {
+            return null;
+        }
+
+        // Remove framing and unescape
+        List<String> recovered = recoverData(data);
+
+        if (recovered.size() < 5) {
+            return null;
+        }
+
+        NotificationResponse response = new NotificationResponse();
+        response.type = Integer.parseInt(recovered.get(0), 16);
+
+        // Parse packet index (2 bytes)
+        String indexHigh = recovered.get(2);
+        String indexLow = recovered.get(3);
+        response.packetIndex = Integer.parseInt(indexHigh + indexLow, 16);
+
+        // Parse response code
+        response.responseCode = Integer.parseInt(recovered.get(4), 16);
+
+        return response;
+    }
+
+    /**
+     * Unescape and remove framing from received data
+     * PUBLIC: Also used by DisplayManagerBridge to parse device responses
+     */
+    public static List<String> recoverData(byte[] data) {
+        List<String> hexList = new ArrayList<>();
+        for (byte b : data) {
+            hexList.add(String.format("%02x", b & 0xFF));
+        }
+
+        // Remove framing (0x01 start, 0x03 end)
+        if (hexList.size() < 4) {
+            return hexList;
+        }
+
+        List<String> targetData = hexList.subList(1, hexList.size() - 1);
+
+        // Unescape data (reverse 0x02 escaping)
+        List<String> result = new ArrayList<>();
+        for (int i = 0; i < targetData.size(); i++) {
+            if (!targetData.get(i).equals("02")) {
+                result.add(targetData.get(i));
+            } else if (i + 1 < targetData.size()) {
+                // Unescape: XOR with 0x04
+                int tempValue = Integer.parseInt(targetData.get(i + 1), 16);
+                tempValue ^= 0x04;
+                result.add(String.format("%02x", tempValue));
+                i++;
+            }
+        }
+
+        // Skip length bytes (first 2 bytes after unescaping)
+        if (result.size() > 2) {
+            return result.subList(2, result.size());
+        }
+
+        return result;
+    }
+
+    /**
+     * Convert hex string list to byte array for BLE write
+     */
+    public static byte[] hexListToBytes(List<String> hexList) {
+        byte[] bytes = new byte[hexList.size()];
+        for (int i = 0; i < hexList.size(); i++) {
+            bytes[i] = (byte) Integer.parseInt(hexList.get(i), 16);
+        }
+        return bytes;
+    }
+}

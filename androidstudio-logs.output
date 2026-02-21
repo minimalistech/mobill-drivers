@@ -1,0 +1,218 @@
+2026-02-05 19:06:52.438 23550-23630 ReactNativeJS           com.mobilldrivers                    I  🎯 Fetching fresh coordinates for serve-ad...
+2026-02-05 19:06:52.440 23550-23630 ReactNativeJS           com.mobilldrivers                    I  🎯 Getting fresh GPS coordinates for serve_ad...
+2026-02-05 19:06:52.465  1424-2032  ActivityManager         system_server                        I  Background started FGS: Allowed [callingPackage: com.mobilldrivers; callingUid: 10344; uidState: FGS ; intent: Intent { act=start cmp=com.mobilldrivers/com.transistorsoft.locationmanager.service.LocationRequestService (has extras) }; code:ACTIVITY_STARTER; tempAllowListReason:<null,reasonCode:LOCATION_PROVIDER,duration:20000,callingUid:10218>; targetSdkVersion:35; callerTargetSdkVersion:35; startForegroundCount:0; bindFromPackage:null]
+2026-02-05 19:06:52.481  1878-20588 SecFgsMana...rollerImpl com.android.systemui                 D  onForegroundStateChanged: dialogShown:false, isForeground:true, packageName:com.mobilldrivers , token:android.os.BinderProxy@5708892, userId:0
+2026-02-05 19:06:52.482  1424-1466  ApplicationPolicy       system_server                        D  isStatusBarNotificationAllowedAsUser: packageName = com.mobilldrivers,userId = 0
+2026-02-05 19:06:52.482  1424-1466  ApplicationPolicy       system_server                        D  isStatusBarNotificationAllowedAsUser: packageName = com.mobilldrivers,userId = 0
+2026-02-05 19:06:52.483  1424-1466  NotificationService     system_server                        E  Suppressing notification from package com.mobilldrivers by user request.
+2026-02-05 19:06:52.490  1878-20588 SecFgsMana...rollerImpl com.android.systemui                 D  onForegroundStateChanged: dialogShown:false, isForeground:true, packageName:com.mobilldrivers , token:android.os.BinderProxy@5708892, userId:0
+2026-02-05 19:06:52.490  1424-1466  ApplicationPolicy       system_server                        D  isStatusBarNotificationAllowedAsUser: packageName = com.mobilldrivers,userId = 0
+2026-02-05 19:06:52.491  1424-1466  ApplicationPolicy       system_server                        D  isStatusBarNotificationAllowedAsUser: packageName = com.mobilldrivers,userId = 0
+2026-02-05 19:06:52.492  1424-1466  NotificationService     system_server                        E  Suppressing notification from package com.mobilldrivers by user request.
+2026-02-05 19:06:52.525  1424-2032  LocationManagerService  system_server                        D  gps provider added registration from 10218/com.google.android.gms[fused_location_provider]/23CB420F -> Request[@0 HIGH_ACCURACY, hiddenFromAppOps, WorkSource{10344 com.mobilldrivers}]
+2026-02-05 19:06:52.527  1424-1710  GnssLocationProvider    system_server                        D  setRequest ProviderRequest[@0, HIGH_ACCURACY, WorkSource{10344 com.mobilldrivers}]
+2026-02-05 19:06:52.536  2825-2860  RequestManager_FLP      com.sec.location.nsflp2              E  [LocationManager] Location request 23CB420F(Listener) gps interval=0ms (min=0ms) from com.google.android.gms.persistent[WorkSource com.mobilldrivers(10344)] (10218_FINE_fg_svc_true_foreground)
+2026-02-05 19:06:52.629  1424-2122  MdnieScena...rolService system_server                        D   packageName : com.mobilldrivers    className : com.mobilldrivers.MainActivity
+2026-02-05 19:06:52.886  1424-3385  ActivityManager         system_server                        D  Received SERVICE intent 0x7ae481d Key{startForegroundService pkg=com.mobilldrivers intent=act=2:28 cmp=com.mobilldrivers/com.transistorsoft.locationmanager.service.LocationRequestService flags=0x2000000 u=0} requestCode=0 from uid 10218
+2026-02-05 19:06:52.894  1878-1935  SecFgsMana...rollerImpl com.android.systemui                 D  onForegroundStateChanged: dialogShown:false, isForeground:true, packageName:com.mobilldrivers , token:android.os.BinderProxy@5708892, userId:0
+2026-02-05 19:06:52.894  1424-1466  ApplicationPolicy       system_server                        D  isStatusBarNotificationAllowedAsUser: packageName = com.mobilldrivers,userId = 0
+2026-02-05 19:06:52.895  1424-1466  ApplicationPolicy       system_server                        D  isStatusBarNotificationAllowedAsUser: packageName = com.mobilldrivers,userId = 0
+2026-02-05 19:06:52.895  1424-1466  NotificationService     system_server                        E  Suppressing notification from package com.mobilldrivers by user request.
+2026-02-05 19:06:52.918 23550-23630 ReactNativeJS           com.mobilldrivers                    I  🎯 Fresh GPS: -34.577918, -58.408031 (accuracy: 1.9m)
+2026-02-05 19:06:52.920 23550-23630 ReactNativeJS           com.mobilldrivers                    I  📍 Using coordinates: lat=-34.577918, lng=-58.4080313
+2026-02-05 19:06:52.922  1878-1935  SecFgsMana...rollerImpl com.android.systemui                 D  onForegroundStateChanged: dialogShown:false, isForeground:true, packageName:com.mobilldrivers , token:android.os.BinderProxy@5708892, userId:0
+2026-02-05 19:06:52.922  1424-1466  ApplicationPolicy       system_server                        D  isStatusBarNotificationAllowedAsUser: packageName = com.mobilldrivers,userId = 0
+2026-02-05 19:06:52.923  1424-1466  ApplicationPolicy       system_server                        D  isStatusBarNotificationAllowedAsUser: packageName = com.mobilldrivers,userId = 0
+2026-02-05 19:06:52.924 23550-23630 ReactNativeJS           com.mobilldrivers                    I  🌐 SERVE-AD API CALL (POST):
+2026-02-05 19:06:52.924  1424-1466  NotificationService     system_server                        E  Suppressing notification from package com.mobilldrivers by user request.
+2026-02-05 19:06:52.925 23550-23630 ReactNativeJS           com.mobilldrivers                    I  📍 URL: https://api.mobill.com/api/v1/core/serve-ad?latitude=-34.577918&longitude=-58.4080313
+2026-02-05 19:06:52.926 23550-23630 ReactNativeJS           com.mobilldrivers                    I  🔑 Authorization: Bearer eyJhbGciOiJIUzI1NiIs...
+2026-02-05 19:06:52.930 23550-23630 ReactNativeJS           com.mobilldrivers                    I  📱 App: 1.0.0 (android) build 1
+2026-02-05 19:06:52.931 23550-23630 ReactNativeJS           com.mobilldrivers                    I  📍 Coordinates: lat=-34.577918, lng=-58.4080313
+2026-02-05 19:06:52.934 23550-23630 ReactNativeJS           com.mobilldrivers                    I  📡 No BLE data available
+2026-02-05 19:06:53.092  1424-2122  MdnieScena...rolService system_server                        D   packageName : com.mobilldrivers    className : com.mobilldrivers.MainActivity
+2026-02-05 19:06:53.107 23550-23630 ReactNativeJS           com.mobilldrivers                    I  ⏸️ Ad fetching paused - timer cleared
+2026-02-05 19:06:53.109 23550-23630 ReactNativeJS           com.mobilldrivers                    I  🎬 Starting to send ad undefined to display (ad fetching paused)
+2026-02-05 19:06:53.124  1878-1935  SecFgsMana...rollerImpl com.android.systemui                 D  onForegroundStateChanged: dialogShown:false, isForeground:false, packageName:com.mobilldrivers , token:android.os.BinderProxy@5708892, userId:0
+2026-02-05 19:06:53.144 23550-23630 ReactNativeJS           com.mobilldrivers                    I  'Displaying ad with config:', '{\n  "contentUrl": "",\n  "displaySize": {\n    "width": 160,\n    "height": 32\n  },\n  "programType": "text",\n  "templateMode": "full",\n  "mode": 2,\n  "speed": 230,\n  "stayTime": 255,\n  "textContent": "ADVERTISE HERE MOBILL.COM",\n  "textColor": "255,255,255"\n}'
+2026-02-05 19:06:53.176 23550-23630 ReactNativeJS           com.mobilldrivers                    I  📊 Ad call count: 13 (next notification at 20)
+2026-02-05 19:06:53.177 23550-23630 ReactNativeJS           com.mobilldrivers                    I  Ad fetched: undefined, Campaign: undefined
+2026-02-05 19:06:53.185 23550-23631 DisplayManagerBridge    com.mobilldrivers                    D  📱 DISPLAY CONTENT called with config: {"textContent":"ADVERTISE HERE MOBILL.COM","textColor":"255,255,255","stayTime":255,"speed":230,"mode":2,"templateMode":"full","programType":"text","displaySize":{"height":32,"width":160},"contentUrl":""}
+2026-02-05 19:06:53.186 23550-23631 DisplayManagerBridge    com.mobilldrivers                    D     contentUrl: 
+2026-02-05 19:06:53.187 23550-23631 DisplayManagerBridge    com.mobilldrivers                    D     displaySize: {"width":160,"height":32}
+2026-02-05 19:06:53.187 23550-23631 DisplayManagerBridge    com.mobilldrivers                    D     programType: text
+2026-02-05 19:06:53.187 23550-23631 DisplayManagerBridge    com.mobilldrivers                    D     templateMode: full
+2026-02-05 19:06:53.187 23550-23631 DisplayManagerBridge    com.mobilldrivers                    D     mode: 2
+2026-02-05 19:06:53.187 23550-23631 DisplayManagerBridge    com.mobilldrivers                    D     speed: 230
+2026-02-05 19:06:53.187 23550-23631 DisplayManagerBridge    com.mobilldrivers                    D     stayTime: 255
+2026-02-05 19:06:53.187 23550-23631 DisplayManagerBridge    com.mobilldrivers                    D     textContent: ADVERTISE HERE MOBILL.COM
+2026-02-05 19:06:53.187 23550-23631 DisplayManagerBridge    com.mobilldrivers                    D     textColor: 255,255,255
+2026-02-05 19:06:53.188 23550-23631 DisplayManagerBridge    com.mobilldrivers                    D  displayTextContent called with text: ADVERTISE HERE MOBILL.COM
+2026-02-05 19:06:53.188 23550-23631 DisplayManagerBridge    com.mobilldrivers                    D     Display params: width=160, height=32, mode=2, speed=230, stayTime=255
+2026-02-05 19:06:53.190 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  📝 Rendered text 'ADVERTISE HERE MOBILL.COM' to bitmap: 160x32
+2026-02-05 19:06:53.190 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  Rendered text bitmap: 160x32
+2026-02-05 19:06:53.191 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  🎨 Converting bitmap to pixel data: 160×32
+2026-02-05 19:06:53.192 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  🔍 Pixel[0,0] ARGB: 255,0,0,0 (raw: 0xFF000000)
+2026-02-05 19:06:53.193 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  🔍 Pixel[0,1] ARGB: 255,0,0,0 (raw: 0xFF000000)
+2026-02-05 19:06:53.193 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  🔍 Pixel[0,2] ARGB: 255,0,0,0 (raw: 0xFF000000)
+2026-02-05 19:06:53.193 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  🔍 Pixel[1,0] ARGB: 255,0,0,0 (raw: 0xFF000000)
+2026-02-05 19:06:53.193 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  🔍 Pixel[1,1] ARGB: 255,0,0,0 (raw: 0xFF000000)
+2026-02-05 19:06:53.193 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  🔍 Pixel[1,2] ARGB: 255,0,0,0 (raw: 0xFF000000)
+2026-02-05 19:06:53.194 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  🔍 Pixel[2,0] ARGB: 255,0,0,0 (raw: 0xFF000000)
+2026-02-05 19:06:53.194 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  🔍 Pixel[2,1] ARGB: 255,0,0,0 (raw: 0xFF000000)
+2026-02-05 19:06:53.194 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  🔍 Pixel[2,2] ARGB: 255,0,0,0 (raw: 0xFF000000)
+2026-02-05 19:06:53.194 23550-23550 DecorView               com.mobilldrivers                    I  notifyKeepScreenOnChanged: keepScreenOn=false
+2026-02-05 19:06:53.201 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  📊 Pixel distribution: black=3280 (64.1%), white=1050 (20.5%), other=790 (15.4%)
+2026-02-05 19:06:53.201 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  📊 First non-black pixel at [2,23]: ARGB(255,25,25,25)
+2026-02-05 19:06:53.201 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  ✅ Pixel data conversion complete: 160 columns × 32 rows
+2026-02-05 19:06:53.202 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  Configured device for display size: 160x32
+2026-02-05 19:06:53.202 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  🔧 startItemContentCommand - rank: 0, total: 1
+2026-02-05 19:06:53.202 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  ⏰ Started transmission timeout watchdog (60s)
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [PROTOCOL] ===== GENERATING PROTOCOL DATA =====
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [PROTOCOL] programIndex: 0, programCount: 1
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_GEN] ===== START ITEM CONTENT GENERATION =====
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_GEN] masterplateCaseType: 7
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_GEN] itemContentCount: 1
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_GEN] itemShowTime: 120
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_GEN] deviceIdentify: 015032160
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_GEN] Added 8 reserved bytes, current length: 8
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_GEN] Added itemContentCount (1), current length: 9
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_GEN] Added itemShowTime (120), current length: 10
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_DATA] coverTypeGraffiti: 0
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_DATA] startColGraffiti: 0
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_DATA] startRowGraffiti: 0
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_DATA] widthDataGraffiti: 160
+2026-02-05 19:06:53.202 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_DATA] heightDataGraffiti: 32
+2026-02-05 19:06:53.215 23550-23550 ViewRootIm...nActivity] com.mobilldrivers                    I  performTraversals params={(0,0)(fillxfill) sim={adjust=resize} ty=BASE_APPLICATION wanim=0x1030309
+                                                                                                      fl=81810900
+                                                                                                      pfl=16020040
+                                                                                                      bhv=DEFAULT
+                                                                                                      fitSides= naviIconColor=0
+                                                                                                      sfl=100000}
+2026-02-05 19:06:53.218 23550-23550 ViewRootIm...nActivity] com.mobilldrivers                    I  performTraversals mFirst=false windowShouldResize=false viewVisibilityChanged=false mForceNextWindowRelayout=false params={(0,0)(fillxfill) sim={adjust=resize} ty=BASE_APPLICATION wanim=0x1030309
+                                                                                                      fl=81810900
+                                                                                                      pfl=16020040
+                                                                                                      bhv=DEFAULT
+                                                                                                      fitSides= naviIconColor=0
+                                                                                                      sfl=100000}
+2026-02-05 19:06:53.220  1424-3385  WindowManager           system_server                        V  Relayout Window{e562197 u0 com.mobilldrivers/com.mobilldrivers.MainActivity}: viewVisibility=8 req=1080x2400 d0
+2026-02-05 19:06:53.230 23550-23550 ViewRootIm...nActivity] com.mobilldrivers                    I  Relayout returned: old=(0,0,1080,2400) new=(0,0,1080,2400) req=(1080,2400)8 dur=11 res=0x0 s={false 0x0} ch=false seqId=0
+2026-02-05 19:06:53.269  1424-2122  MdnieScena...rolService system_server                        D   packageName : com.mobilldrivers    className : com.mobilldrivers.MainActivity
+2026-02-05 19:06:53.299 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] ===== GRAFFITI CONTENT STRUCTURE =====
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Total size with 4-byte prefix: 10268 bytes
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Content size (without prefix): 10264 bytes
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Pixel data size: 10240 bytes
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] First 50 bytes:
+                                                                                                    [GRAFFITI_BYTES]                    00 00 28 1c 02 00 00 00 00 00 00 00 00 00 00 00 
+                                                                                                    [GRAFFITI_BYTES]                    00 00 a0 00 20 02 d5 ff 00 00 28 00 00 00 00 00 
+                                                                                                    [GRAFFITI_BYTES]                    00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 
+                                                                                                    [GRAFFITI_BYTES]                    00 00 
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Byte 0-3 (4-byte length): 00 00 28 1c = 10268 bytes
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Byte 4 (type): 02 (should be 02 for graffiti)
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Bytes 5-11 (7 reserved): 00 00 00 00 00 00 00
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Byte 12 (coverType): 00
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Bytes 13-14 (startCol): 00 00 = 0
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Bytes 15-16 (startRow): 00 00 = 0
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Bytes 17-18 (width): 00 a0 = 160
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Bytes 19-20 (height): 00 20 = 32
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Byte 21 (showModel): 02 = 2
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Byte 22 (speed+239): d5 = 469
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Byte 23 (stayTime): ff = 255
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Bytes 24-27 (pixel length): 00 00 28 00 = 10240 bytes
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] Bytes 28+ (pixel data): 00 00 00 00 00 00...
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [GRAFFITI_BYTES] ===== END GRAFFITI STRUCTURE =====
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_GEN] Added content data, total length: 10278
+2026-02-05 19:06:53.300 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_GEN] First 100 chars: 000000000000000001780000281c0200000000000000000000000000a0002002d5ff00002800000000000000000000000000
+2026-02-05 19:06:53.301 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_GEN] ===== END ITEM CONTENT GENERATION =====
+2026-02-05 19:06:53.301 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [PROTOCOL] 1. Original program data size: 10278 bytes
+2026-02-05 19:06:53.304 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [BEGIN_PACKET] ===== BEGIN PACKET STRUCTURE (before framing) =====
+2026-02-05 19:06:53.304 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [BEGIN_PACKET] programData size: 10278 bytes
+2026-02-05 19:06:53.304 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [BEGIN_PACKET] CRC32: 0b2a9746 (4 bytes)
+2026-02-05 19:06:53.304 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [BEGIN_PACKET] Length: 00002826 = 10278 bytes
+2026-02-05 19:06:53.304 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [BEGIN_PACKET] Index: 00
+2026-02-05 19:06:53.304 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [BEGIN_PACKET] Count: 01
+2026-02-05 19:06:53.304 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [BEGIN_PACKET] Raw packet (11 bytes): 02 0b 2a 97 46 00 00 28 26 00 01
+2026-02-05 19:06:53.304 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [BEGIN_PACKET] ===== END BEGIN PACKET STRUCTURE =====
+2026-02-05 19:06:53.304 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [BEGIN_PACKET] Framed packet: 01 00 0b 02 06 0b 2a 97 46 00 00 28 26 00 02 05 03
+2026-02-05 19:06:53.304 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [PROTOCOL] 2. Begin packet created, size: 17 bytes
+2026-02-05 19:06:53.341 23550-24747 LzssAlgorithm           com.mobilldrivers                    D  [LZSS] Input: 10278 bytes, Output: 1860 bytes, Ratio: 18.1%
+2026-02-05 19:06:53.341 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [PROTOCOL] 3. Compressed data size: 1860 bytes
+2026-02-05 19:06:53.341 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_PACKET] ===== DATA PACKET GENERATION =====
+2026-02-05 19:06:53.341 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_PACKET] Compressed data size: 1860 bytes
+2026-02-05 19:06:53.341 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_PACKET] Chunk size: 1024, Total packets: 2
+2026-02-05 19:06:53.342 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_PACKET] Packet 0 structure (before framing):
+2026-02-05 19:06:53.342 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_PACKET]   Type: 03
+2026-02-05 19:06:53.342 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_PACKET]   Reserved: 00
+2026-02-05 19:06:53.342 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_PACKET]   Total length: 00000744 = 1860
+2026-02-05 19:06:53.342 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_PACKET]   Index: 0000
+2026-02-05 19:06:53.342 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_PACKET]   Chunk size: 0400 = 1024
+2026-02-05 19:06:53.342 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_PACKET]   XOR Checksum: 24
+2026-02-05 19:06:53.342 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_PACKET]   Chunk data (first 20 bytes): fe ed 15 01 78 00 00 28 1c 02 7e e9 1a a0 00 20 02 d5 ff f8 
+2026-02-05 19:06:53.344 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [DATA_PACKET] ===== END DATA PACKET GENERATION =====
+2026-02-05 19:06:53.345 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [PROTOCOL] 4. Data packets created: 2 packets
+2026-02-05 19:06:53.345 23550-24747 CoolledUProtocol        com.mobilldrivers                    D  [PROTOCOL] ===== END PROTOCOL DATA GENERATION =====
+2026-02-05 19:06:53.345 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  📦 Generated protocol data - begin packet size: 17, data packets: 2
+2026-02-05 19:06:53.345 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  📋 Begin packet hex: 01 00 0b 02 06 0b 2a 97 46 00 00 28 26 00 02 05 03 
+2026-02-05 19:06:53.345 23550-24747 CoolLEDUBT              com.mobilldrivers                    D  🔹 Single packet mode: 17 bytes
+2026-02-05 19:06:53.345 23550-24747 CoolLEDUBT              com.mobilldrivers                    D  Characteristic properties: 22 (WRITE=8, WRITE_NO_RESPONSE=4)
+2026-02-05 19:06:53.345 23550-24747 CoolLEDUBT              com.mobilldrivers                    D  Using WRITE_TYPE_NO_RESPONSE
+2026-02-05 19:06:53.348 23550-24747 CoolLEDUBT              com.mobilldrivers                    D  Write data initiated: true, length: 17
+2026-02-05 19:06:53.348 23550-24747 DisplayManagerBridge    com.mobilldrivers                    D  Text content command initiated (sent as graffiti/image)
+2026-02-05 19:06:53.351 23550-23563 CoolLEDUBT              com.mobilldrivers                    D  ✅ Characteristic write successful - sessionId: 46, chunks: false, currentChunkIndex: 5, total chunks: 0, pendingWriteCallback: true, chunkingCallback: false
+2026-02-05 19:06:53.351 23550-23563 CoolLEDUBT              com.mobilldrivers                    D  ✅ Single write completed, calling pendingWriteCallback.onWriteSuccess()
+2026-02-05 19:06:53.351 23550-23563 DisplayManagerBridge    com.mobilldrivers                    D  ✅ Begin packet sent successfully, waiting for device 0200 response...
+2026-02-05 19:06:53.351 23550-23563 CoolLEDUBT              com.mobilldrivers                    D  ✅ Write queue empty, marking write complete
+2026-02-05 19:06:53.419 23550-23563 CoolLEDUBT              com.mobilldrivers                    D  Notification received: 010002060206020503
+2026-02-05 19:06:53.419 23550-23563 DisplayManagerBridge    com.mobilldrivers                    D  Device notification received: 010002060206020503 (length: 9)
+2026-02-05 19:06:53.420 23550-23563 DisplayManagerBridge    com.mobilldrivers                    D  Unframed response: 0201
+2026-02-05 19:06:53.420 23550-23563 DisplayManagerBridge    com.mobilldrivers                    W  Device sent 0201 (framed) - iOS treats as success, triggering type=2 notification
+2026-02-05 19:06:53.420 23550-23563 DisplayManagerBridge    com.mobilldrivers                    D  📢 Protocol notification - type: 2, rank: 0, vcType: 0
+2026-02-05 19:06:53.420 23550-23563 DisplayManagerBridge    com.mobilldrivers                    W  Type 2: Device sent 0201 - treating as success (matching iOS behavior)
+2026-02-05 19:06:53.420 23550-23563 DisplayManagerBridge    com.mobilldrivers                    D  ⏰ Cancelled transmission timeout watchdog
+2026-02-05 19:06:53.423 23550-23630 ReactNativeJS           com.mobilldrivers                    I  ✅ Displayed ad: undefined from campaign: undefined
+2026-02-05 19:06:53.424 23550-23630 ReactNativeJS           com.mobilldrivers                    I  Content type: text, Template: full
+2026-02-05 19:06:53.425 23550-23630 ReactNativeJS           com.mobilldrivers                    I  ▶️ Ad fetching resumed - timer restarted (15 seconds)
+2026-02-05 19:06:53.425 23550-23630 ReactNativeJS           com.mobilldrivers                    I  🏁 Finished sending ad to display (ad fetching resumed)
+2026-02-05 19:06:53.909  1424-3403  ActivityManager         system_server                        D  Received intent 5,7ae481d Key{startForegroundService pkg=com.mobilldrivers intent=act=2:28 cmp=com.mobilldrivers/com.transistorsoft.locationmanager.service.LocationRequestService flags=0x2000000 u=0} requestCode=0 is canceled from UID:10344 PID:23550
+2026-02-05 19:06:53.915 18458-24256 FusedLocation           com.google.android.gms.persistent    W  registration 10344/com.mobilldrivers transport failure [CONTEXT service_id=6 ]
+                                                                                                    android.app.PendingIntent$CanceledException
+                                                                                                    	at android.app.PendingIntent.send(PendingIntent.java:1002)
+                                                                                                    	at cssl.a(:com.google.android.gms@260235029@26.02.35 (190400-862924022):25)
+                                                                                                    	at cssm.c(:com.google.android.gms@260235029@26.02.35 (190400-862924022):72)
+                                                                                                    	at csrp.c(:com.google.android.gms@260235029@26.02.35 (190400-862924022):53)
+                                                                                                    	at coqy.run(:com.google.android.gms@260235029@26.02.35 (190400-862924022):16)
+                                                                                                    	at bekn.c(:com.google.android.gms@260235029@26.02.35 (190400-862924022):50)
+                                                                                                    	at bekn.run(:com.google.android.gms@260235029@26.02.35 (190400-862924022):73)
+                                                                                                    	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1154)
+                                                                                                    	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:652)
+                                                                                                    	at beqe.run(:com.google.android.gms@260235029@26.02.35 (190400-862924022):8)
+                                                                                                    	at java.lang.Thread.run(Thread.java:1563)
+2026-02-05 19:06:53.932  1424-3403  LocationManagerService  system_server                        D  gps provider added registration from 10218/com.google.android.gms[fused_location_provider]/23CB420F -> Request[@+1s0ms HIGH_ACCURACY, minUpdateInterval=0, hiddenFromAppOps, WorkSource{10344 com.mobilldrivers}]
+2026-02-05 19:06:53.934  1424-1710  GnssLocationProvider    system_server                        D  setRequest ProviderRequest[@+1s0ms, HIGH_ACCURACY, WorkSource{10344 com.mobilldrivers}]
+2026-02-05 19:06:53.943  2825-2860  RequestManager_FLP      com.sec.location.nsflp2              E  [LocationManager] Location request 23CB420F(Listener) gps interval=1000ms (min=0ms) from com.google.android.gms.persistent[WorkSource com.mobilldrivers(10344)] (10218_FINE_fg_svc_true_foreground)
+2026-02-05 19:06:56.058  1424-2032  ActivityManager         system_server                        I  Force stopping com.mobilldrivers appid=10344 user=0: from pid 24752
+2026-02-05 19:06:56.060  1424-2032  ActivityManager         system_server                        I  Killing 23550:com.mobilldrivers/u0a344 (adj 200): stop com.mobilldrivers due to from pid 24752
+2026-02-05 19:06:56.065  1424-2032  ActivityManager         system_server                        D  proc ProcessRecord{c16557b 23550:com.mobilldrivers/u0a344} already removed. so we skip next process.
+2026-02-05 19:06:56.065  1878-1935  SecFgsMana...rollerImpl com.android.systemui                 D  onForegroundStateChanged: dialogShown:false, isForeground:false, packageName:com.mobilldrivers , token:android.os.BinderProxy@e1b1bdf, userId:0
+2026-02-05 19:06:56.065  1424-2032  ActivityTaskManager     system_server                        W  Force removing ActivityRecord{ff93714 u0 com.mobilldrivers/.MainActivity} t75 f}}: app died, no saved state
+2026-02-05 19:06:56.066  1424-2032  InputManager-JNI        system_server                        W  Input channel object 'e562197 com.mobilldrivers/com.mobilldrivers.MainActivity (client)' was disposed without first being removed with the input manager!
+2026-02-05 19:06:56.068  1424-1465  UsageStatsService       system_server                        W  Unexpected activity event reported! (com.mobilldrivers/com.mobilldrivers.MainActivity event : 23 instanceId : 249410994)
+2026-02-05 19:06:56.073  1424-2032  WindowManager           system_server                        V  Remove Window{e562197 u0 com.mobilldrivers/com.mobilldrivers.MainActivity}: mSurfaceController=null mAnimatingExit=false mRemoveOnExit=false mHasSurface=false surfaceShowing=false animating=false app-animation=false mWillReplaceWindow=false mDisplayFrozen=false callers=com.android.server.wm.WindowState.removeIfPossible:3041 com.android.server.wm.WindowToken.removeAllWindowsIfPossible:234 com.android.server.wm.ActivityRecord.removeIfPossible:4886 com.android.server.wm.ActivityRecord.onRemovedFromDisplay:5001 com.android.server.wm.DisplayContent.removeAppToken:1683 com.android.server.wm.ActivityRecord.removeFromHistory:4605 
+2026-02-05 19:06:56.080   901-901   Layer                   surfaceflinger                       I  id=5313 removeFromCurrentState e562197 com.mobilldrivers/com.mobilldrivers.MainActivity#5313 (102)
+2026-02-05 19:06:56.080   901-901   SurfaceFlinger          surfaceflinger                       I  id=5313 Removed e562197 com.mobilldrivers/com.mobilldrivers.MainActivity#5313 (102)
+2026-02-05 19:06:56.080   901-901   Layer                   surfaceflinger                       I  id=5313 Destroyed e562197 com.mobilldrivers/com.mobilldrivers.MainActivity#5313
+2026-02-05 19:06:56.082   901-950   SurfaceFlinger          surfaceflinger                       I  id=5312 Removed 4cdbd67 ActivityRecordInputSink com.mobilldrivers/.MainActivity#5312 (101)
+2026-02-05 19:06:56.085  1424-2032  InputManager-JNI        system_server                        W  Input channel object 'Letterbox_left_ActivityRecord{ff93714 u0 com.mobilldrivers/.MainActivity} t75} (client)' was disposed without first being removed with the input manager!
+2026-02-05 19:06:56.086  1424-2032  InputManager-JNI        system_server                        W  Input channel object 'Letterbox_top_ActivityRecord{ff93714 u0 com.mobilldrivers/.MainActivity} t75} (client)' was disposed without first being removed with the input manager!
+2026-02-05 19:06:56.087  1424-2032  InputManager-JNI        system_server                        W  Input channel object 'Letterbox_right_ActivityRecord{ff93714 u0 com.mobilldrivers/.MainActivity} t75} (client)' was disposed without first being removed with the input manager!
+2026-02-05 19:06:56.087  1424-2032  InputManager-JNI        system_server                        W  Input channel object 'Letterbox_bottom_ActivityRecord{ff93714 u0 com.mobilldrivers/.MainActivity} t75} (client)' was disposed without first being removed with the input manager!
+2026-02-05 19:06:56.091   901-901   Layer                   surfaceflinger                       I  id=5307 removeFromCurrentState ActivityRecord{ff93714 u0 com.mobilldrivers/.MainActivity} t75}#5307 (102)
+2026-02-05 19:06:56.091   901-901   Layer                   surfaceflinger                       I  id=5312 removeFromCurrentState 4cdbd67 ActivityRecordInputSink com.mobilldrivers/.MainActivity#5312 (102)
+2026-02-05 19:06:56.092   901-901   SurfaceFlinger          surfaceflinger                       I  id=5307 Removed ActivityRecord{ff93714 u0 com.mobilldrivers/.MainActivity} t75}#5307 (102)
+2026-02-05 19:06:56.093   901-901   Layer                   surfaceflinger                       I  id=5307 Destroyed ActivityRecord{ff93714 u0 com.mobilldrivers/.MainActivity} t75}#5307
+2026-02-05 19:06:56.093   901-901   Layer                   surfaceflinger                       I  id=5312 Destroyed 4cdbd67 ActivityRecordInputSink com.mobilldrivers/.MainActivity#5312
+2026-02-05 19:06:56.111  1827-1827  CarrierSvcBindHelper    com.android.phone                    D  onHandleForceStop: [com.mobilldrivers]
+2026-02-05 19:06:56.273  2137-2147  LeAppInfo               com.android.bluetooth                D  removeLeacReportedServerApp, appName: com.mobilldrivers
+2026-02-05 19:06:56.274   901-2764  SurfaceFlinger          surfaceflinger                       D  [SF client] REMOVE (0xb400007e8885a620) for (23550:com.mobilldrivers)
+---------------------------- PROCESS ENDED (23550) for package com.mobilldrivers ----------------------------
+2026-02-05 19:06:56.274  1424-1851  ActivityManager         system_server                        V  Got obituary of 23550:com.mobilldrivers
