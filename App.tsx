@@ -7,26 +7,50 @@
  * Copyright © 2024 Mobill. All rights reserved.
  */
 
-import React, { useState, useEffect } from 'react';
-import { ActivityIndicator, View, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { ActivityIndicator, View, StyleSheet, AppState } from 'react-native';
 
 import AuthService from './src/services/AuthService';
 import BackgroundLocationService from './src/services/BackgroundLocationService';
+import AdService from './src/services/AdService';
 
 import LandingScreen from './src/screens/LandingScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import LocationPermissionScreen from './src/screens/LocationPermissionScreen';
 import NotificationPermissionScreen from './src/screens/NotificationPermissionScreen';
 import HomeScreen from './src/screens/HomeScreen';
+import DebugScreen from './src/screens/DebugScreen';
 
-type AppScreen = 'loading' | 'landing' | 'login' | 'location' | 'notification' | 'home';
+type AppScreen = 'loading' | 'landing' | 'login' | 'location' | 'notification' | 'home' | 'debug';
 
 function App(): React.JSX.Element {
   const [currentScreen, setCurrentScreen] = useState<AppScreen>('loading');
   const [isInitialized, setIsInitialized] = useState(false);
+  const currentScreenRef = useRef<AppScreen>('loading');
+
+  // Keep ref in sync so the AppState handler can read it without stale closure
+  useEffect(() => {
+    currentScreenRef.current = currentScreen;
+  }, [currentScreen]);
 
   useEffect(() => {
     initializeApp();
+
+    // When the app returns to foreground from the location permission screen,
+    // re-check whether the user granted location access in Settings.
+    const subscription = AppState.addEventListener('change', async (nextState) => {
+      if (nextState === 'active' && currentScreenRef.current === 'location') {
+        const hasLocationPermission = await BackgroundLocationService.hasLocationPermissions();
+        if (hasLocationPermission) {
+          try {
+            await BackgroundLocationService.startLocationTracking();
+          } catch (_) {}
+          setCurrentScreen('notification');
+        }
+      }
+    });
+
+    return () => subscription.remove();
   }, []);
 
   const checkNotificationPermissions = async (): Promise<boolean> => {
@@ -123,6 +147,18 @@ function App(): React.JSX.Element {
     setCurrentScreen('landing');
   };
 
+  const handleOpenDebug = () => {
+    // Pause the automatic ad loop so it can't overwrite anything while in debug.
+    AdService.pauseAdFetching();
+    setCurrentScreen('debug');
+  };
+
+  const handleCloseDebug = () => {
+    // resumeAdFetching is a no-op if ad serving was never active.
+    AdService.resumeAdFetching();
+    setCurrentScreen('home');
+  };
+
   if (!isInitialized) {
     return (
       <View style={styles.loadingContainer}>
@@ -155,7 +191,10 @@ function App(): React.JSX.Element {
       );
 
     case 'home':
-      return <HomeScreen onLogout={handleLogout} />;
+      return <HomeScreen onLogout={handleLogout} onOpenDebug={handleOpenDebug} />;
+
+    case 'debug':
+      return <DebugScreen onClose={handleCloseDebug} />;
 
     default:
       return (

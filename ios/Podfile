@@ -20,6 +20,7 @@ target 'MobillDrivers' do
   # Add MobillDriversProtocol as local pod
   pod 'MobillDriversProtocol', :path => './MobillDriversProtocol'
 
+
   use_react_native!(
     :path => config[:reactNativePath],
     # An absolute path to your application root.
@@ -34,6 +35,30 @@ target 'MobillDrivers' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # Fix fmt library consteval errors with newer Xcode/Clang versions
+    installer.pods_project.targets.each do |target|
+      if target.name == 'fmt' || target.name == 'RCT-Folly'
+        target.build_configurations.each do |config|
+          config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
+          config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'FMT_EXCEPTIONS=0'
+          config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
+        end
+      end
+    end
+
+    # Fix TSBackgroundFetch module not found — the xcframework is installed as a
+    # static pod without a module map visible to dependent targets. Add the
+    # framework search path and module map so RNBackgroundFetch can @import it.
+    installer.pods_project.targets.each do |target|
+      if target.name == 'RNBackgroundFetch'
+        target.build_configurations.each do |config|
+          config.build_settings['FRAMEWORK_SEARCH_PATHS'] ||= ['$(inherited)']
+          config.build_settings['FRAMEWORK_SEARCH_PATHS'] << '$(PODS_ROOT)/TSBackgroundFetch/TSBackgroundFetch.xcframework/ios-arm64'
+          config.build_settings['FRAMEWORK_SEARCH_PATHS'] << '$(PODS_ROOT)/TSBackgroundFetch/TSBackgroundFetch.xcframework/ios-arm64_x86_64-simulator'
+        end
+      end
+    end
 
     # Add codegen script phase to ensure generated files exist before build
     app_project = installer.aggregate_targets.find { |target| target.name == 'MobillDrivers' }&.user_project

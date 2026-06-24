@@ -20,6 +20,7 @@ const API_BASE_URL = 'https://api.mobill.com';
 export interface DriverEarnings {
   today: string;
   this_month: string;
+  commission_rate: number;
 }
 
 export interface AdContent {
@@ -63,7 +64,9 @@ class AdServiceClass {
   private isAdServingActive: boolean = false;
   private onAdReceived?: (ad: AdResponse) => void;
   private onEarningsUpdated?: (earnings: DriverEarnings) => void;
+  private onFetchError?: () => void;
   private appStateSubscription: any = null;
+  private initialFetchRetryCount: number = 0;
 
   // BLE rolling window (keeps last 2 scans = 50 seconds)
   private bleScanHistory: BLEScanResult[] = [];
@@ -129,6 +132,7 @@ class AdServiceClass {
       }
 
       const data: AdResponse = await response.json();
+      console.log('📦 serve-ad raw response:', JSON.stringify(data));
       return data;
     } catch (error) {
       console.error('Error fetching ad:', error);
@@ -206,7 +210,8 @@ class AdServiceClass {
 
   startAdServing(
     onAdReceived: (ad: AdResponse) => void,
-    onEarningsUpdated: (earnings: DriverEarnings) => void
+    onEarningsUpdated: (earnings: DriverEarnings) => void,
+    onFetchError?: () => void
   ): void {
     if (this.isAdServingActive) {
       console.warn('Ad serving is already active');
@@ -215,7 +220,9 @@ class AdServiceClass {
 
     this.onAdReceived = onAdReceived;
     this.onEarningsUpdated = onEarningsUpdated;
+    this.onFetchError = onFetchError;
     this.isAdServingActive = true;
+    this.initialFetchRetryCount = 0;
 
     // Listen to app state changes
     this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange.bind(this));
@@ -256,7 +263,7 @@ class AdServiceClass {
         // Track ad call for earnings notifications
         try {
           const notificationService = await loadNotificationService();
-          notificationService.incrementAdCallAndCheckEarnings(adData.driver_earnings.today);
+          notificationService.incrementAdCallAndCheckEarnings(adData.driver_earnings.today, adData.driver_earnings.commission_rate);
         } catch (error) {
           console.error('Failed to load NotificationService for ad tracking:', error);
         }
@@ -271,7 +278,12 @@ class AdServiceClass {
           console.log('Timer started - fetching ads every 15 seconds (background-enabled)');
         }
       } else {
-        console.warn('Failed to fetch first ad, retrying in 5 seconds...');
+        this.initialFetchRetryCount++;
+        console.warn(`Failed to fetch first ad (attempt ${this.initialFetchRetryCount}), retrying in 5 seconds...`);
+        if (this.initialFetchRetryCount >= 3 && this.onFetchError) {
+          console.error('Ad fetch failed 3 times - notifying user');
+          this.onFetchError();
+        }
         // Retry after 5 seconds if first ad fails
         setTimeout(() => {
           if (this.isAdServingActive) {
@@ -281,6 +293,11 @@ class AdServiceClass {
       }
     } catch (error) {
       console.error('Error in fetchAndProcessAdWithTimer:', error);
+      this.initialFetchRetryCount++;
+      if (this.initialFetchRetryCount >= 3 && this.onFetchError) {
+        console.error('Ad fetch failed 3 times - notifying user');
+        this.onFetchError();
+      }
       // Retry after 5 seconds on error
       setTimeout(() => {
         if (this.isAdServingActive) {
@@ -304,6 +321,8 @@ class AdServiceClass {
     this.isAdServingActive = false;
     this.onAdReceived = undefined;
     this.onEarningsUpdated = undefined;
+    this.onFetchError = undefined;
+    this.initialFetchRetryCount = 0;
 
     // Clear BLE history when stopping ad serving
     this.clearBLEHistory();
@@ -391,7 +410,7 @@ class AdServiceClass {
         // Track ad call for earnings notifications
         try {
           const notificationService = await loadNotificationService();
-          notificationService.incrementAdCallAndCheckEarnings(adData.driver_earnings.today);
+          notificationService.incrementAdCallAndCheckEarnings(adData.driver_earnings.today, adData.driver_earnings.commission_rate);
         } catch (error) {
           console.error('Failed to load NotificationService for ad tracking:', error);
         }

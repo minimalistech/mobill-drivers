@@ -474,10 +474,22 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
                 frameDataArray.add(frameData);
             }
 
-            // Set animation data (like iOS)
+            // Per-frame display interval, controlled from the backend via the ad's
+            // stayTime (milliseconds per frame). For CoolLEDU devices the protocol
+            // emits a SINGLE global interval (timeIntervalAnimation) and ignores the
+            // per-frame frameEveInterval array (that array is only honored on
+            // CoolLEDMX/UX, which we don't run) — so drive timeIntervalAnimation from
+            // stayTime instead of the old hardcoded 200ms. The display supports
+            // 5-5000ms; the JS layer (validateAnimationInterval) already clamps to
+            // this range, clamp here too as a safety net. Mirrors the iOS fix in
+            // ios/MobillDriversProtocol/DisplayManagerBridge.m.
+            int frameMs = stayTime;
+            if (frameMs < 5) frameMs = 5;
+            if (frameMs > 5000) frameMs = 5000;
+
             animationModel.setDataAnimation(frameDataArray);
-            animationModel.setFrameEveInterval(new ArrayList<>()); // Empty like manufacturer
-            animationModel.setTimeIntervalAnimation(200); // Match iOS value (200ms = 5fps)
+            animationModel.setFrameEveInterval(new ArrayList<>()); // unused on CoolLEDU; single interval below
+            animationModel.setTimeIntervalAnimation(frameMs);
 
             // Create ColorItemModel32
             ColorItemModel32 colorItemModel = new ColorItemModel32();

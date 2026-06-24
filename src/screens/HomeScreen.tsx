@@ -19,7 +19,7 @@ import AuthService from '../services/AuthService';
 import AppVersionService from '../services/AppVersionService';
 import DisplayStatusAPI from '../services/DisplayStatusAPI';
 import DisplayMonitorService from '../services/DisplayMonitorService';
-import { validateStayTime, validateSpeed, validateMode } from '../utils/displayValidation';
+import { buildDisplayConfig } from '../utils/displayValidation';
 import DisplayStatusIndicator, { type DisplayStatus } from '../components/DisplayStatusIndicator';
 import DisplayManagerModule from '../DisplayManager';
 import NotificationServiceModule from '../services/NotificationService';
@@ -43,28 +43,37 @@ const loadNotificationService = async () => {
 
 interface HomeScreenProps {
   onLogout: () => void;
+  onOpenDebug: () => void;
 }
 
-const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
+const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout, onOpenDebug }) => {
   const [isDisplayConnected, setIsDisplayConnected] = useState(false);
+  const [showEarnings, setShowEarnings] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [discoveredDevices, setDiscoveredDevices] = useState<BluetoothDevice[]>([]);
   const [earnings, setEarnings] = useState<DriverEarnings>({
     today: '--',
     this_month: '--',
+    commission_rate: 0,
   });
   const [appVersion, setAppVersion] = useState('');
   const [userInitiatedShutdown, setUserInitiatedShutdown] = useState(false);
   const [disconnectionDuration, setDisconnectionDuration] = useState(0);
   const [showDisconnectWarning, setShowDisconnectWarning] = useState(false);
-  const [displayStatus, setDisplayStatus] = useState<DisplayStatus>('displaying');
+  const [displayStatus, setDisplayStatus] = useState<DisplayStatus>('no_ads');
   const userInitiatedShutdownRef = useRef<boolean>(false);
   const connectSubscriptionRef = useRef<any>(null);
   const disconnectSubscriptionRef = useRef<any>(null);
   const discoverySubscriptionRef = useRef<any>(null);
   const bleSubscriptionRef = useRef<any>(null);
   const isSendingToDisplayRef = useRef<boolean>(false);
+  // Ref mirrors isScanning so onDeviceDiscovered (which captures a stale closure)
+  // can distinguish a user-initiated pairing scan from the continuous BLE impression scan.
+  const isScanningRef = useRef<boolean>(false);
+  // Secret 3-tap gesture on the version number to open the hidden debug screen.
+  const versionTapCountRef = useRef<number>(0);
+  const versionTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     // Load version information on mount
@@ -107,6 +116,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
         console.log('Device connected:', event);
         setIsDisplayConnected(true);
         setIsConnecting(false);
+        isScanningRef.current = false;
+        setIsScanning(false);
 
         // Check if this is a reconnection after unintended disconnect
         const wasMonitoring = DisplayMonitorService.isCurrentlyMonitoring();
@@ -238,22 +249,30 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
       console.log('=== DISCOVERY EVENT RECEIVED ===');
       console.log('Event object:', JSON.stringify(event, null, 2));
       console.log('Number of devices:', event.devices ? event.devices.length : 'undefined');
-      console.log('Current isScanning state:', isScanning);
-      console.log('Current isConnecting state:', isConnecting);
+      console.log('Current isScanningRef:', isScanningRef.current);
       console.log('================');
+
+      // Guard: only act on discovery events that originate from a user-initiated
+      // pairing scan. The continuous BLE impression scan also fires onDeviceDiscovered
+      // and must NOT trigger a connect attempt (that would set isConnecting=true and
+      // leave the button stuck in the grey/spinner state).
+      if (!isScanningRef.current) {
+        console.log('Discovery event ignored - not a pairing scan (continuous BLE scan result)');
+        return;
+      }
 
       setDiscoveredDevices(event.devices || []);
 
       if (event.devices && event.devices.length > 0) {
         // Devices found - connect to first device
         console.log('Devices found, connecting to first device');
-        console.log('Setting isScanning to false and starting connection');
+        isScanningRef.current = false;
         setIsScanning(false);
         connectToFirstDevice(event.devices[0]);
       } else {
         // No devices found after 10-second timeout (handled natively)
         console.log('No devices found after timeout, updating UI state');
-        console.log('Setting isScanning to false and isConnecting to false');
+        isScanningRef.current = false;
         setIsScanning(false);
         setIsConnecting(false);
         console.log('About to show error alert');
@@ -325,10 +344,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
       const apiLevel = Platform.Version;
 
       if (apiLevel >= 31) {
-        // Android 12+ requires BLUETOOTH_SCAN and BLUETOOTH_CONNECT
+        // Android 12+ requires BLUETOOTH_SCAN and BLUETOOTH_CONNECT.
+        // Also request ACCESS_FINE_LOCATION — required for BLE scanning on
+        // Samsung One UI 6+ (Android 14) despite neverForLocation flag in manifest.
         const permissions = [
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
         ];
 
         const results = await PermissionsAndroid.requestMultiple(permissions);
@@ -408,7 +430,18 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
         return;
       }
 
-      // Check Bluetooth state before scanning
+      // Request Bluetooth permissions first — on Android 14 (Samsung One UI 6+)
+      // calling any Bluetooth API before BLUETOOTH_CONNECT is granted throws a
+      // SecurityException and silently aborts the flow before the dialog appears.
+      console.log('=== REQUESTING BLUETOOTH PERMISSIONS ===');
+      const hasPermissions = await requestBluetoothPermissions();
+      if (!hasPermissions) {
+        console.log('Bluetooth permissions not granted');
+        return;
+      }
+      console.log('Bluetooth permissions granted');
+
+      // Check Bluetooth state after permissions are secured
       console.log('=== CHECKING BLUETOOTH STATE ===');
       let bluetoothState: BluetoothState = await manager.checkBluetoothState();
       console.log('Initial Bluetooth state:', bluetoothState);
@@ -422,15 +455,6 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
         );
         return;
       }
-
-      // Request Bluetooth permissions
-      console.log('=== REQUESTING BLUETOOTH PERMISSIONS ===');
-      const hasPermissions = await requestBluetoothPermissions();
-      if (!hasPermissions) {
-        console.log('Bluetooth permissions not granted');
-        return;
-      }
-      console.log('Bluetooth permissions granted');
 
       if (!bluetoothState.enabled) {
         // Give user a moment to enable Bluetooth after granting permission
@@ -457,6 +481,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
       // Not connected yet, start scanning and connecting process
       console.log('=== STARTING DEVICE SCAN ===');
       console.log('Setting isScanning to true');
+      isScanningRef.current = true;
       setIsScanning(true);
       console.log('Setting isConnecting to false');
       setIsConnecting(false);
@@ -468,6 +493,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
 
       if (!success) {
         console.log('Scan failed, resetting UI state');
+        isScanningRef.current = false;
         setIsScanning(false);
         Alert.alert('Error', 'Failed to start device scan. Please check Bluetooth permissions.');
         return;
@@ -479,6 +505,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
 
     } catch (error) {
       console.error('Scan error:', error);
+      isScanningRef.current = false;
       setIsScanning(false);
       setIsConnecting(false);
       Alert.alert('Error', `Failed to start scan: ${error}`);
@@ -563,10 +590,19 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
   const startAdServing = () => {
     AdService.startAdServing(
       (ad: AdResponse) => {
+        console.log(`💰 commission_rate received: ${ad.driver_earnings.commission_rate}`);
+        setShowEarnings(ad.driver_earnings.commission_rate > 0);
         displayAd(ad);
       },
       (earnings: DriverEarnings) => {
         setEarnings(earnings);
+      },
+      () => {
+        Alert.alert(
+          'Connection Issue',
+          'Unable to load ads. Please check your internet connection or try logging out and back in.',
+          [{ text: 'OK' }]
+        );
       }
     );
   };
@@ -601,18 +637,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
         setDisplayStatus('displaying');
       }
 
-      // Validate and sanitize display parameters according to CoolLEDU protocol
-      const config = {
-        contentUrl: ad.content.contentUrl,
-        displaySize: ad.content.displaySize,
-        programType: ad.content.programType,
-        templateMode: ad.content.templateMode || 'full',
-        mode: validateMode(ad.content.mode),
-        speed: validateSpeed(ad.content.speed),
-        stayTime: validateStayTime(ad.content.stayTime),
-        textContent: ad.content.textContent,
-        textColor: ad.content.textColor,
-      };
+      // Validate and sanitize display parameters according to CoolLEDU protocol.
+      // Shared with the debug screen's manual Play so both send identical configs.
+      const config = buildDisplayConfig(ad.content);
 
       console.log('Displaying ad with config:', JSON.stringify(config, null, 2));
 
@@ -632,6 +659,41 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
       // The timer will restart, giving the ad its full display time before next fetch
       AdService.resumeAdFetching();
       console.log(`🏁 Finished sending ad to display (ad fetching resumed)`);
+    }
+  };
+
+  // Secret gesture: 3 taps on the version number within 1.5s opens the debug screen.
+  const handleVersionTap = () => {
+    versionTapCountRef.current += 1;
+
+    if (versionTapTimerRef.current) {
+      clearTimeout(versionTapTimerRef.current);
+    }
+    versionTapTimerRef.current = setTimeout(() => {
+      versionTapCountRef.current = 0;
+    }, 1500);
+
+    if (versionTapCountRef.current >= 3) {
+      versionTapCountRef.current = 0;
+      if (versionTapTimerRef.current) {
+        clearTimeout(versionTapTimerRef.current);
+        versionTapTimerRef.current = null;
+      }
+
+      // The debug screen takes exclusive ownership of the single shared BLE
+      // connection. If the display is connected here, opening debug would let
+      // it start a second connection attempt over the same link and wedge the
+      // app. Require the user to disconnect first.
+      if (isDisplayConnected) {
+        Alert.alert(
+          'Disconnect display first',
+          'Please turn off the display before opening the debug screen, then try again.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      onOpenDebug();
     }
   };
 
@@ -717,21 +779,23 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
               )}
             </TouchableOpacity>
 
-            <View style={styles.earningsContainer}>
-              <View style={styles.earningsBox}>
-                <Text style={styles.earningsLabel}>Today</Text>
-                <Text style={styles.earningsAmount}>
-                  {earnings.today === '--' ? '--' : `$${earnings.today}`}
-                </Text>
-              </View>
+            {showEarnings && (
+              <View style={styles.earningsContainer}>
+                <View style={styles.earningsBox}>
+                  <Text style={styles.earningsLabel}>Today</Text>
+                  <Text style={styles.earningsAmount}>
+                    {earnings.today === '--' ? '--' : `$${earnings.today}`}
+                  </Text>
+                </View>
 
-              <View style={styles.earningsBox}>
-                <Text style={styles.earningsLabel}>This month</Text>
-                <Text style={styles.earningsAmount}>
-                  {earnings.this_month === '--' ? '--' : `$${earnings.this_month}`}
-                </Text>
+                <View style={styles.earningsBox}>
+                  <Text style={styles.earningsLabel}>This month</Text>
+                  <Text style={styles.earningsAmount}>
+                    {earnings.this_month === '--' ? '--' : `$${earnings.this_month}`}
+                  </Text>
+                </View>
               </View>
-            </View>
+            )}
           </View>
 
           {/* Disconnection Warning Banner */}
@@ -761,11 +825,15 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout }) => {
             </TouchableOpacity>
           </View>
 
-          {/* Version Display */}
+          {/* Version Display — secret 3-tap target to open the debug screen */}
           {appVersion ? (
-            <View style={styles.versionContainer}>
+            <TouchableOpacity
+              style={styles.versionContainer}
+              onPress={handleVersionTap}
+              activeOpacity={1}
+            >
               <Text style={styles.versionText}>{appVersion}</Text>
-            </View>
+            </TouchableOpacity>
           ) : null}
         </View>
     </SafeAreaView>

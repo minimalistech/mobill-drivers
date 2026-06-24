@@ -1,5 +1,5 @@
 import BackgroundGeolocation from 'react-native-background-geolocation';
-import { Platform } from 'react-native';
+import { Platform, PermissionsAndroid } from 'react-native';
 
 export interface Coordinates {
   latitude: number;
@@ -22,21 +22,19 @@ class BackgroundLocationServiceClass {
 
       // Activity Recognition - disabled to avoid Motion & Fitness permission
       disableMotionActivityUpdates: true, // Disable motion activity globally
-      disableStopDetection: true, // Disable stop detection completely
+      disableStopDetection: true, // Disable stop detection — vehicle is always moving when app is active
 
       // Application config
-      debug: false, // Disable debug mode completely
+      debug: false,
       logLevel: BackgroundGeolocation.LOG_LEVEL_OFF,
-      stopOnTerminate: true, // Continue tracking when app is terminated
-      startOnBoot: false, // Don't start on device boot
-      enableHeadless: false, // Don't enable headless mode
+      stopOnTerminate: true,
+      startOnBoot: false,
+      enableHeadless: false,
 
       // HTTP / PERSISTANCE config
-      url: '', // We'll handle HTTP ourselves via AdService
-      autoSync: false, // We handle syncing manually
+      url: '', // We handle HTTP ourselves via AdService
+      autoSync: false,
 
-      // Background Sync & Battery Saving
-      locationTimeout: 60, // Max time to wait for location
       backgroundPermissionRationale: {
         title: "Enable Background Location",
         message: "For the best car advertising experience, Mobill needs location access even when your phone is locked. This ensures fresh, accurate ads while driving.",
@@ -44,26 +42,28 @@ class BackgroundLocationServiceClass {
         negativeAction: 'Keep "While Using App"'
       },
 
-      // iOS-specific config for car advertising
+      // iOS-specific config
       ...Platform.select({
         ios: {
-          preventSuspend: true, // Prevent app suspension for continuous tracking
-          heartbeatInterval: 60, // Keep alive signal every minute
-          showsBackgroundLocationIndicator: true, // Show blue bar (required for Always permission)
-          disableLocationAuthorizationAlert: false, // Allow permission prompts
-          disableMotionActivityUpdates: true, // Disable motion activity to prevent Motion & Fitness permission
+          preventSuspend: true,
+          heartbeatInterval: 60,
+          showsBackgroundLocationIndicator: true,
+          disableLocationAuthorizationAlert: false,
+          disableMotionActivityUpdates: true,
         },
         android: {
-          locationUpdateInterval: 5000, // Update every 2 seconds on Android
-          fastestLocationUpdateInterval: 1000, // Fastest update interval
+          // Force continuous location updates — the motion engine is disabled so we
+          // must use time/distance-based updates directly via FusedLocationProvider.
+          locationUpdateInterval: 15000,     // Request update every 15s (matches ad fetch cadence)
+          fastestLocationUpdateInterval: 5000, // Accept updates as fast as every 5s
+          deferTime: 0,                        // Don't defer/batch updates
+          locationTimeout: 60,
         }
       })
     };
   }
 
   async initialize(): Promise<void> {
-    if (true) return;
-
     if (this.isConfigured) return;
 
     try {
@@ -139,6 +139,34 @@ class BackgroundLocationServiceClass {
         console.log('🚨 Location permission denied');
       }
     });
+  }
+
+  /**
+   * Request foreground ("While using the app") permission only.
+   * Uses PermissionsAndroid directly to guarantee an inline dialog — bypassing
+   * BackgroundGeolocation.ready() which is a one-shot initialiser and cannot be
+   * re-called with a different locationAuthorizationRequest after first use.
+   * Returns true if foreground (or better) permission was granted.
+   */
+  async requestForegroundPermission(): Promise<boolean> {
+    try {
+      console.log('🎯 Requesting foreground location permission via PermissionsAndroid...');
+      const result = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+        {
+          title: 'Location Permission',
+          message: 'Mobill needs access to your location to deliver geographically targeted ads to your LED display.',
+          buttonPositive: 'Allow',
+          buttonNegative: 'Deny',
+        }
+      );
+      const granted = result === PermissionsAndroid.RESULTS.GRANTED;
+      console.log(`🎯 Foreground permission result: ${result}, granted: ${granted}`);
+      return granted;
+    } catch (error) {
+      console.error('🚨 Failed to request foreground permission:', error);
+      return false;
+    }
   }
 
   /**

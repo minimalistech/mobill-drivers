@@ -2377,9 +2377,36 @@ PODS:
     - SocketRocket
   - RNBackgroundFetch (4.2.8):
     - React-Core
-  - RNBackgroundGeolocation (4.19.0):
+  - RNBackgroundGeolocation (5.0.5):
+    - boost
     - CocoaLumberjack (~> 3.8.5)
+    - DoubleConversion
+    - fast_float
+    - fmt
+    - glog
+    - hermes-engine
+    - RCT-Folly
+    - RCT-Folly/Fabric
+    - RCTRequired
+    - RCTTypeSafety
     - React-Core
+    - React-debug
+    - React-Fabric
+    - React-featureflags
+    - React-graphics
+    - React-ImageManager
+    - React-jsi
+    - React-NativeModulesApple
+    - React-RCTFabric
+    - React-renderercss
+    - React-rendererdebug
+    - React-utils
+    - ReactCodegen
+    - ReactCommon/turbomodule/bridging
+    - ReactCommon/turbomodule/core
+    - SocketRocket
+    - TSLocationManager (~> 4.0.10)
+    - Yoga
   - RNCAsyncStorage (2.2.0):
     - boost
     - DoubleConversion
@@ -2413,6 +2440,9 @@ PODS:
   - RNDeviceInfo (14.1.1):
     - React-Core
   - SocketRocket (0.7.1)
+  - TSBackgroundFetch (4.0.6)
+  - TSLocationManager (4.0.21):
+    - TSBackgroundFetch (~> 4.0.6)
   - Yoga (0.0.0)
 
 DEPENDENCIES:
@@ -2503,6 +2533,8 @@ SPEC REPOS:
   trunk:
     - CocoaLumberjack
     - SocketRocket
+    - TSBackgroundFetch
+    - TSLocationManager
 
 EXTERNAL SOURCES:
   boost:
@@ -2743,14 +2775,16 @@ SPEC CHECKSUMS:
   ReactAppDependencyProvider: 448b422f8af1dedf81374eacc90a15439a0ed7f5
   ReactCodegen: 3baedb0c33f963250c866151b825a3c5194b12f1
   ReactCommon: e897f9a1b4afab370cfefaaf5fb3c80371bc3937
-  RNBackgroundFetch: 534f5bba01d1e45559aa7d53f42e00124378db93
-  RNBackgroundGeolocation: 71fcbef8a77ea5febced97f223d47c15cc549526
+  RNBackgroundFetch: 6beda5d87281c73c983f172bec818d6814b85feb
+  RNBackgroundGeolocation: ed3993ef68b0c8bc0d2286cb8896c8cd88b6b0c4
   RNCAsyncStorage: 302f2fac014fd450046c120567ca364632da682b
   RNCPushNotificationIOS: 64218f3c776c03d7408284a819b2abfda1834bc8
   RNDeviceInfo: 8b6fa8379062949dd79a009cf3d6b02a9c03ca59
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
+  TSBackgroundFetch: 0afbeaae4e1132866e1d4b6e55265af26b5958ae
+  TSLocationManager: 4dec8151fe8085350b18acc13d47949b12774b57
   Yoga: 11c9686a21e2cd82a094a723649d9f4507200fb0
 
-PODFILE CHECKSUM: 1463427eafe520881ee6682fa524e5bb06acc730
+PODFILE CHECKSUM: bd4c4f652bc0180ebca40480087f0a383266ac75
 
 COCOAPODS: 1.15.2

@@ -934,21 +934,25 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     
     // Convert images to color data using the same method as working images
     NSMutableArray *frameDataArray = [NSMutableArray array];
-    NSMutableArray *intervalArray = [NSMutableArray array];
 
     for (UIImage *frame in animationFrames) {
         NSArray *frameData = [JTCommon getColorDataDefaultFromImage:frame scale:1.0];
         [frameDataArray addObject:frameData];
-        [intervalArray addObject:@(stayTime.intValue)]; // Each frame shows for stayTime duration
     }
-    
-    // Configure animation parameters to match manufacturer's working values
+
+    // Per-frame display interval. For CoolLEDU devices, JTTool emits a SINGLE
+    // global interval (timeIntervalAnimation) and ignores frameEveInterval — the
+    // per-frame array is only honored for CoolLEDMX/UX, which we don't run. So
+    // drive timeIntervalAnimation from the ad's stayTime (milliseconds per frame).
+    // The display supports 5-5000ms; JS clamps to this, clamp here as a safety net.
+    NSInteger frameMs = stayTime.intValue;
+    if (frameMs < 5) frameMs = 5;
+    if (frameMs > 5000) frameMs = 5000;
+
     animationModel.dataAnimation = frameDataArray;
-    // Manufacturer uses empty frameEveInterval, not individual frame intervals
-    animationModel.frameEveInterval = @[]; // Empty array like manufacturer
-    // Manufacturer uses timeIntervalAnimation: 548, not speed value
-    animationModel.timeIntervalAnimation = 200; // Match manufacturer's working value
-    
+    animationModel.frameEveInterval = @[]; // unused on CoolLEDU; single interval below
+    animationModel.timeIntervalAnimation = frameMs;
+
     
     // Create ColorItemModel32 with animation content - match manufacturer's values
     ColorItemModel32 *colorItemModel = [JTCommon getColorItemModel32];

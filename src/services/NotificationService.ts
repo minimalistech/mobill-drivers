@@ -172,7 +172,10 @@ class NotificationServiceClass {
   /**
    * Increment ad call counter and show earnings notification if milestone reached
    */
-  incrementAdCallAndCheckEarnings(todaysEarnings: string): void {
+  incrementAdCallAndCheckEarnings(todaysEarnings: string, commissionRate: number): void {
+    if (commissionRate === 0) {
+      return;
+    }
     this.adCallCount++;
     console.log(`📊 Ad call count: ${this.adCallCount} (next notification at ${this.nextEarningsNotification})`);
 

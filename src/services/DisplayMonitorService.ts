@@ -157,9 +157,9 @@ class DisplayMonitorServiceClass {
    */
   private scheduleReconnectionAttempts(): void {
     const attemptDelays = [
-      60000,   // 1 minute
-      180000,  // 3 minutes
-      300000,  // 5 minutes
+      5000,    // 5 seconds
+      15000,   // 15 seconds
+      30000,   // 30 seconds
     ];
 
     attemptDelays.forEach((delay, index) => {
@@ -188,14 +188,19 @@ class DisplayMonitorServiceClass {
 
     try {
       const manager = await loadDisplayManager();
-      const success = await manager.connectToDevice(this.lastDeviceId);
+
+      // Use startScan() rather than connectToDevice() — a direct GATT connect only
+      // works when the device is already advertising, which is a narrow window after
+      // power-on. A scan actively discovers the device and the native scanCallback
+      // auto-connects to any previously-saved device it finds.
+      this.wasLastReconnectionAuto = true;
+      const success = await manager.startScan();
 
       if (success) {
-        console.log(`📊 DisplayMonitor: Automatic reconnection #${attemptNumber} initiated, waiting for device connection event...`);
-        this.wasLastReconnectionAuto = true;
+        console.log(`📊 DisplayMonitor: Scan started for reconnection #${attemptNumber}, waiting for device discovery...`);
         // Note: stopMonitoring() will be called from onDeviceConnected in HomeScreen if connection succeeds
       } else {
-        console.log(`❌ DisplayMonitor: Automatic reconnection #${attemptNumber} failed to initiate`);
+        console.log(`❌ DisplayMonitor: Scan failed to start for reconnection #${attemptNumber}`);
 
         // If all 3 attempts failed, send immediate notification
         if (attemptNumber === 3) {

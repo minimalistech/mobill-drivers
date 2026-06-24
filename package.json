@@ -7,7 +7,8 @@
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "postinstall": "patch-package"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -17,7 +18,7 @@
     "react": "19.1.0",
     "react-native": "0.81.1",
     "react-native-background-fetch": "^4.2.8",
-    "react-native-background-geolocation": "^4.19.0",
+    "react-native-background-geolocation": "^5.0.5",
     "react-native-background-timer": "^2.4.1",
     "react-native-device-info": "^14.1.1",
     "react-native-push-notification": "^8.1.1",
