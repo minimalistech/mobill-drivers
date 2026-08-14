@@ -901,6 +901,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     // Determine frame source based on content URL
     NSArray<UIImage *> *animationFrames;
     CGSize targetSize = CGSizeMake(width.intValue, height.intValue);
+    CFAbsoluteTime perfStart = CFAbsoluteTimeGetCurrent();
 
     // Check if contentUrl is a GIF file
     if ([contentUrl.lowercaseString hasSuffix:@".gif"]) {
@@ -932,6 +933,8 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
         }
     }
     
+    CFAbsoluteTime perfFramesDone = CFAbsoluteTimeGetCurrent();
+
     // Convert images to color data using the same method as working images
     NSMutableArray *frameDataArray = [NSMutableArray array];
 
@@ -939,6 +942,8 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
         NSArray *frameData = [JTCommon getColorDataDefaultFromImage:frame scale:1.0];
         [frameDataArray addObject:frameData];
     }
+
+    CFAbsoluteTime perfConvertDone = CFAbsoluteTimeGetCurrent();
 
     // Per-frame display interval. For CoolLEDU devices, JTTool emits a SINGLE
     // global interval (timeIntervalAnimation) and ignores frameEveInterval — the
@@ -970,6 +975,16 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     
     // CRITICAL: Generate content structure BEFORE calling startItemContentCommand (like manufacturer)
     NSString *sendItem = [JTTool getItemTotalContent:colorItemModel];
+
+    CFAbsoluteTime perfSerializeDone = CFAbsoluteTimeGetCurrent();
+    unsigned long rawBytes = (unsigned long)(animationFrames.count * width.intValue * height.intValue * 2);
+    NSLog(@"PERF|animation|frames=%lu|raw_bytes=%lu|serialized_hexchars=%lu|t_frames_ms=%.0f|t_convert_ms=%.0f|t_serialize_ms=%.0f",
+          (unsigned long)animationFrames.count,
+          rawBytes,
+          (unsigned long)sendItem.length,
+          (perfFramesDone - perfStart) * 1000.0,
+          (perfConvertDone - perfFramesDone) * 1000.0,
+          (perfSerializeDone - perfConvertDone) * 1000.0);
 
     // Complete animation protocol: startItemContentCommand then setItemContentCommand
     [JTTool startItemContentCommand:colorItemModel

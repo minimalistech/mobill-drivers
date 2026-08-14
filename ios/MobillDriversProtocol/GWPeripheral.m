@@ -24,6 +24,15 @@
 @property (nonatomic, copy) SendCompletion subCompletion;
 
 @property (nonatomic, strong) dispatch_source_t timerDelay;
+
+// PERF instrumentation (additive only, no behavior change)
+@property (nonatomic, assign) CFAbsoluteTime perfTransferStart;
+@property (nonatomic, assign) CFAbsoluteTime perfPacketSendTime;
+@property (nonatomic, assign) NSInteger perfAckCount;
+@property (nonatomic, assign) double perfAckSumMs;
+@property (nonatomic, assign) double perfAckMinMs;
+@property (nonatomic, assign) double perfAckMaxMs;
+@property (nonatomic, assign) NSInteger perfRetryCount;
 @end
 
 @implementation GWPeripheral
@@ -389,6 +398,12 @@
     }
     
     if (code == 0) {
+        double pktMs = (CFAbsoluteTimeGetCurrent() - self.perfPacketSendTime) * 1000.0;
+        self.perfAckCount++;
+        self.perfAckSumMs += pktMs;
+        if (pktMs < self.perfAckMinMs) self.perfAckMinMs = pktMs;
+        if (pktMs > self.perfAckMaxMs) self.perfAckMaxMs = pktMs;
+
         HLHUD *hud = [HLHUDHelper currentHud];
         float percent = (100.0 * _packageModel.currentPackageId / _packageModel.packageContentModels.count);
         NSString *detailText = [NSString stringWithFormat:@"%d%%", (int)percent];
@@ -399,6 +414,15 @@
         oneModel.state = PackageCommandFlagSentSuccess;
         
         if (packageId >= _packageModel.packageContentModels.count - 1 ) {
+            double totalMs = (CFAbsoluteTimeGetCurrent() - self.perfTransferStart) * 1000.0;
+            double avgMs = self.perfAckCount > 0 ? self.perfAckSumMs / self.perfAckCount : 0;
+            NSLog(@"PERF|transfer|packets=%lu|retries=%ld|t_transfer_ms=%.0f|pkt_avg_ms=%.1f|pkt_min_ms=%.1f|pkt_max_ms=%.1f",
+                  (unsigned long)_packageModel.packageContentModels.count,
+                  (long)self.perfRetryCount,
+                  totalMs,
+                  avgMs,
+                  self.perfAckCount > 0 ? self.perfAckMinMs : 0,
+                  self.perfAckMaxMs);
             if (_sendCompletion) {
                 if([ThemManager sharedInstance].promptItemType == 0){
                     _sendCompletion(YES, showText(@"发送成功"));
@@ -417,6 +441,8 @@
         }
     } else {
         // Device returned error/busy - add delay before retry (100ms)
+        self.perfRetryCount++;
+        NSLog(@"PERF|pkt_error|packageId=%ld|code=%ld", (long)packageId, (long)code);
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [self sendCurrentPackageCommand];
         });
@@ -459,6 +485,13 @@
 {
     _packageModel = packageModel;
     _sendCompletion = completion;
+
+    self.perfTransferStart = CFAbsoluteTimeGetCurrent();
+    self.perfAckCount = 0;
+    self.perfAckSumMs = 0;
+    self.perfAckMinMs = DBL_MAX;
+    self.perfAckMaxMs = 0;
+    self.perfRetryCount = 0;
     
     __weak typeof(self) weakSelf = self;
     _subCompletion = ^ (BOOL success, NSString *msg) {
@@ -506,6 +539,7 @@
     
     currentModel.state = PackageCommandFlagReady;
     [[HLBluetoothManager standardManager] writeCommand:currentModel.packageContent onDevice:self];
+    self.perfPacketSendTime = CFAbsoluteTimeGetCurrent();
     NSDate *currentDate = [NSDate date];
     NSTimeInterval timestamp = [currentDate timeIntervalSince1970] * 1000; // 转换为毫秒
     NSString *timestampString = [NSString stringWithFormat:@"%.0f", timestamp];
@@ -555,6 +589,8 @@
         HLOnePackageModel *model = [self.packageModel.packageContentModels objectAtIndex:currentPackageId];
         if (model.state == PackageCommandFlagSent) {
             // 出错或者超时，重新发送
+            self.perfRetryCount++;
+            NSLog(@"PERF|pkt_timeout|packageId=%ld", (long)currentPackageId);
             NSDate *currentDate = [NSDate date];
             NSTimeInterval timestamp = [currentDate timeIntervalSince1970] * 1000; // 转换为毫秒
             NSString *timestampString = [NSString stringWithFormat:@"%.0f", timestamp];
