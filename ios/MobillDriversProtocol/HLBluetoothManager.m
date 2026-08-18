@@ -345,6 +345,18 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
     NSMutableString *mCommad = [NSMutableString stringWithString:command];
 
     int commadLength = ([ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDM16 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDMX16 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDM32 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDU16 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDUX16 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDU32 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDUiLedBike12 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDU24 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDU20 || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDHeightAdaption || [ThemManager sharedInstance].deviceType == BTPeripheralTypeCoolLEDC48) ? 360 : 38;
+
+    // Respect the link's actual write limit instead of assuming 180 bytes.
+    // Capped at the manufacturer-proven 180 (360 hex chars); if the link
+    // ever reports lower, shrink so writes are never silently truncated.
+    NSUInteger maxWriteBytes = [peripheralModel.peripheral maximumWriteValueLengthForType:CBCharacteristicWriteWithoutResponse];
+    if (maxWriteBytes > 0 && commadLength == 360) {
+        int linkLength = (int)MIN(maxWriteBytes, (NSUInteger)180) * 2;
+        if (linkLength != commadLength) {
+            NSLog(@"PERF|chunk_size|max_write_bytes=%lu|chunk_hexchars=%d", (unsigned long)maxWriteBytes, linkLength);
+        }
+        commadLength = linkLength;
+    }
     while (mCommad.length >= commadLength) {
         NSString *str = [mCommad substringWithRange:NSMakeRange(0, commadLength)];
         [mCommad deleteCharactersInRange:NSMakeRange(0, commadLength)];
