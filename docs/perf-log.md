@@ -45,6 +45,12 @@ identifiable on the phone (Version 1.0.5 (N) on the home screen / in Settings).
 - Per-packet cost is radio/firmware-quantized: ~113 ms best, 135–230 ms session-dependent. **First-time sends are floor-bound at roughly packets × ~120-230 ms** (nike: ~19–30 s). LZSS already achieves 79% on nike; the encoder already emits RGB444, so pre-quantization gains nothing. No further app-side transport lever exists for first-time sends within this protocol.
 - The remaining transformative wins are protocol-level: **`0201` CRC skip** (repeat sends → ~1–2 s; production ads repeat constantly) and **program slots 0–8** (preload rotation, switch in ms).
 
+### Fresh-content investigation (offline, no device needed)
+- **Preprocessing is a dead end**: posterize/median-filter variants of the three GIFs change LZSS output by <1%. The logos are already flat; dithering is not the problem.
+- **The app's LZSS encoder is optimal for its format**: on an identical input stream, the app's `LzssAlgorithm` and the textbook Okumura reference both produce exactly 148,022 bytes (nike, 40 frames). Compression cannot be meaningfully improved while staying decoder-compatible (N=512 window, 18-byte max match are firmware-fixed).
+- **The manufacturer's CoolLEDU path also stop-and-waits** (one packet per ACK — `DeviceManager.checkCoolLEDUMessages`: `mSendIndex++` per response). Earlier notes claiming it streams without ACKs referred to a different device family. Firmware docs say response=1 means "retransmit ALL data" — strict sequencing is expected.
+- Therefore fresh-content floor ≈ packets × per-packet time (~113-230 ms): nike ~19-30 s. Remaining options: (A) windowed sending experiment (2 packets in flight; off-protocol, needs garage validation, ≤2× if firmware tolerates it), (B) hide the upload architecturally — preload the next ad while the current one displays (slots; manufacturer warns of frame-count limits with multiple stored programs), plus CRC skip for revisits.
+
 ### Build 2 conclusions
 - Step 1a (backpressure) produced **no speedup**: the 10 ms chunk pacing had been overlapping radio transmission, not extending it. Kept anyway (correct mechanism, 0 retries, no cost).
 - Per-packet floor is ~97–120 ms (connection-interval + device ACK). Inter-packet gap distribution is bimodal: ~76 packets at 90–180 ms, ~61 at 210–330 ms (missed connection events / main-thread contention), max 1.37 s.
