@@ -22,11 +22,20 @@ identifiable on the phone (Version 1.0.5 (N) on the home screen / in Settings).
 |---|---|
 | 1 | Phase 0 instrumentation only — baseline |
 | 2 | + step 1b (log gating) + step 1a (backpressure chunk writes) |
+| 3 | + step 1c (no 15 ms post-ACK delay) + step 1d (link-derived chunk size, capped 180) + ACK-handler log gating |
 
 ## Results
 
 | Step (commit) | GIF | frames | packets | t_frames_ms | t_convert_ms | t_serialize_ms | t_transfer_ms | pkt_avg_ms | retries | total (stopwatch) | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Baseline (Phase 0, ee91660) | nike | 40 (of 114) | 157 (1,061 chunks) | 1150 | 89 | 147 | 29177 | 168.5 (min 102.7, max 1456.5) | 0 | ~31 s | logs/202608180627.log; LZSS 737 KB → ~158 KB |
-| Baseline (Phase 0) | adidas | | | | | | | | | | not yet run |
-| Baseline (Phase 0) | prada | | | | | | | | | | not yet run |
+| Build 2 (1b+1a, b72bbda) | nike | 40 | 157 | 551 | 85 | 144 | 29403 | 167.5 (min 97.1, max 1350.0) | 0 | ~30 s | logs/202608180648.log — backpressure path active on all packets |
+| Build 2 | prada | 30 | 133 | 408 | 74 | 116 | 18538 | 119.8 | 0 | ~19 s | |
+| Build 2 | adidas | 35 | 112 | 508 | 69 | 135 | 25759 | 209.6 | 0 | ~26 s | |
+| Build 2 | nike (repeat) | 40 | 157 | 692 | 85 | 140 | 32469 | 187.2 | 0 | display showed in ~1–2 s | **Device answered `0201` at begin (CRC cache hit) and displayed instantly; app re-uploaded 157 packets anyway** |
+
+### Build 2 conclusions
+- Step 1a (backpressure) produced **no speedup**: the 10 ms chunk pacing had been overlapping radio transmission, not extending it. Kept anyway (correct mechanism, 0 retries, no cost).
+- Per-packet floor is ~97–120 ms (connection-interval + device ACK). Inter-packet gap distribution is bimodal: ~76 packets at 90–180 ms, ~61 at 210–330 ms (missed connection events / main-thread contention), max 1.37 s.
+- Remaining transport levers: remove 15 ms post-ACK delay (1c), get send/ACK handling off the contended main thread (1e). Beating the ~120 ms × packets floor requires fewer packets (Phase 2 compression) or the `0201` CRC skip.
+- **`0201` at the begin command = device already has this CRC32 and is displaying it.** First-time sends got `0200`. Skipping the 157-packet data phase on `0201` makes repeat content ~1–2 s.
