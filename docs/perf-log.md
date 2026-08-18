@@ -17,6 +17,6 @@ Grep the Xcode console for `PERF|` lines and record them here after each gate ru
 
 | Step (commit) | GIF | frames | packets | t_frames_ms | t_convert_ms | t_serialize_ms | t_transfer_ms | pkt_avg_ms | retries | total (stopwatch) | Notes |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| Baseline (Phase 0) | nike | | | | | | | | | | |
-| Baseline (Phase 0) | adidas | | | | | | | | | | |
-| Baseline (Phase 0) | prada | | | | | | | | | | |
+| Baseline (Phase 0, ee91660) | nike | 40 (of 114) | 157 (1,061 chunks) | 1150 | 89 | 147 | 29177 | 168.5 (min 102.7, max 1456.5) | 0 | ~31 s | logs/202608180627.log; LZSS 737 KB → ~158 KB |
+| Baseline (Phase 0) | adidas | | | | | | | | | | not yet run |
+| Baseline (Phase 0) | prada | | | | | | | | | | not yet run |

@@ -19,6 +19,11 @@
 #define ServiceUUID @"FFF0"
 #define NewCharacteristicUUID @"FFF1"
 
+// Per-chunk console logging costs real time at ~1,000 chunks per animation
+// (hex dump alone is O(chunk bytes) string building on the main queue).
+// 0 keeps transfers quiet; set to 1 only when debugging the BLE chunk stream.
+#define HL_VERBOSE_CHUNK_LOGGING 0
+
 typedef NS_ENUM(NSUInteger, PackageSendCode) {
     PackageSendCodeSuccess = 0,
     PackageSendCodeFail = 1,
@@ -259,7 +264,9 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
         return; // All chunks sent
     }
 
+#if HL_VERBOSE_CHUNK_LOGGING
     NSLog(@"📦 Sending chunk %ld of %lu with delay", (long)index, (unsigned long)chunks.count);
+#endif
     NSString *strTemp = chunks[index];
     NSMutableData *data = [NSMutableData data];
     for (int i = 0; i < strTemp.length; i += 2) {
@@ -267,6 +274,7 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
         [data appendData:[HLUtils stringToByte:temp]];
     }
 
+#if HL_VERBOSE_CHUNK_LOGGING
     // Instrumentation: Log the raw bytes as hex before writing
     NSMutableString *hexString = [NSMutableString string];
     const unsigned char *bytes = (const unsigned char *)[data bytes];
@@ -274,6 +282,7 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
         [hexString appendFormat:@"%02X ", bytes[i]];
     }
     NSLog(@"[GROK] Writing to 0000fff1 on %@ (%@): %@", peripheralModel.name, peripheralModel.UUIDString, hexString);
+#endif
 
     [peripheralModel.peripheral writeValue:data forCharacteristic:[self.characterDictionary objectForKey:peripheralModel.UUIDString] type:CBCharacteristicWriteWithoutResponse];
 
