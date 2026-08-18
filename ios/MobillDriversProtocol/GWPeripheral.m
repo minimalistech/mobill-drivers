@@ -434,10 +434,9 @@
             _sendCompletion = nil;
         } else {
             _packageModel.currentPackageId++;
-            // Add small delay between packets to prevent BLE overflow (15ms)
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.015 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                [self sendCurrentPackageCommand];
-            });
+            // The device just ACKed this packet, so it is ready for the next one;
+            // chunk-level flow control is handled by canSendWriteWithoutResponse.
+            [self sendCurrentPackageCommand];
         }
     } else {
         // Device returned error/busy - add delay before retry (100ms)
