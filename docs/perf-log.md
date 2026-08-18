@@ -23,6 +23,7 @@ identifiable on the phone (Version 1.0.5 (N) on the home screen / in Settings).
 | 1 | Phase 0 instrumentation only — baseline |
 | 2 | + step 1b (log gating) + step 1a (backpressure chunk writes) |
 | 3 | + step 1c (no 15 ms post-ACK delay) + step 1d (link-derived chunk size, capped 180) + ACK-handler log gating |
+| 4 | + CRC skip: animation data upload deferred until the begin ACK; skipped entirely on `0201` (device already stores the CRC32). 5 s fallback to unconditional upload if the begin response is lost. |
 
 ## Results
 

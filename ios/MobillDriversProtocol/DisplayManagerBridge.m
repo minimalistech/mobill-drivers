@@ -34,6 +34,11 @@ static NSString * const MOBILL_DRIVERS_VERSION = @"2.96";
 @property (nonatomic, assign) int currentStayTime;
 @property (nonatomic, assign) int currentDisplayWidth;
 @property (nonatomic, assign) int currentDisplayHeight;
+
+// Animation model waiting for the device's begin-command response. Data is
+// uploaded only if the device answers 0200 (needs it); on 0201 the device
+// already stores this CRC32 and is displaying it, so the upload is skipped.
+@property (nonatomic, strong) ColorItemModel32 *pendingAnimationModel;
 @property (nonatomic, strong) NSTimer *scanTimeoutTimer;
 @property (nonatomic, assign) BOOL isScanActive;
 // Continuous BLE scanning for impression tracking
@@ -986,19 +991,33 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
           (perfConvertDone - perfFramesDone) * 1000.0,
           (perfSerializeDone - perfConvertDone) * 1000.0);
 
-    // Complete animation protocol: startItemContentCommand then setItemContentCommand
+    // Animation protocol: send the begin command (carries the program CRC32),
+    // then wait for the device's response before uploading data.
+    //   0200 (finishItem type=1) -> device needs the data -> setItemContentCommand
+    //   0201 (finishItem type=2) -> device already stores this CRC32 and is
+    //                               displaying it -> skip the upload entirely
+    // Both are handled in sendNextItem:. Fallback below covers a lost response.
+    self.pendingAnimationModel = colorItemModel;
     [JTTool startItemContentCommand:colorItemModel
                            itemRank:0
                      itemTotalCount:1
                            onDevice:device];
-    
-    // Step 2: Send actual animation data like manufacturer does
-    // Manufacturer calls setItemContentCommand with 6182 bytes after startItemContentCommand
-    [JTTool setItemContentCommand:colorItemModel
-                         itemRank:0
-                           VCType:1
-                         onDevice:device];
-    
+
+    // If neither response arrives (begin command or its ACK lost), fall back to
+    // the old unconditional upload rather than hanging the send.
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(5.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf) return;
+        if (strongSelf.pendingAnimationModel == colorItemModel) {
+            NSLog(@"PERF|begin_ack_timeout|falling back to unconditional upload");
+            strongSelf.pendingAnimationModel = nil;
+            [JTTool setItemContentCommand:colorItemModel
+                                 itemRank:0
+                                   VCType:1
+                                 onDevice:strongSelf.connectedDevice];
+        }
+    });
 }
 
 
@@ -1300,12 +1319,25 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
 
         if ([type intValue] == 1) {
 
-            // Animation notifications might be handled differently by the protocol
-            // For now, let the JTTool.startItemContentCommand handle it without notification intervention
+            // 0200: device does not have this program CRC32 - upload the data
+            if (self.pendingAnimationModel) {
+                NSLog(@"PERF|begin_ack|upload_needed");
+                ColorItemModel32 *model = self.pendingAnimationModel;
+                self.pendingAnimationModel = nil;
+                [JTTool setItemContentCommand:model
+                                     itemRank:0
+                                       VCType:1
+                                     onDevice:self.connectedDevice];
+            }
 
         } else if ([type intValue] == 2) {
 
-            // Resolve promise on success
+            // 0201: device already stores this CRC32 and is displaying it -
+            // skip the upload and resolve immediately
+            if (self.pendingAnimationModel) {
+                NSLog(@"PERF|crc_skip|device already has this content, upload skipped");
+                self.pendingAnimationModel = nil;
+            }
             if (self.pendingResolve) {
                 self.pendingResolve(@(YES));
                 self.pendingResolve = nil;
@@ -1314,7 +1346,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
 
         } else if ([type intValue] == 3) {
 
-            // Resolve promise on success
+            // Data upload complete - resolve promise on success
             if (self.pendingResolve) {
                 self.pendingResolve(@(YES));
                 self.pendingResolve = nil;
