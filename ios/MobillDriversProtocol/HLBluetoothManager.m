@@ -769,10 +769,12 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
 
 - (void)peripheral:(CBPeripheral *)peripheral didUpdateValueForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error
 {
+#if HL_VERBOSE_CHUNK_LOGGING
     // DEEP INSTRUMENTATION: Log response reception details
     NSLog(@"🔍 [DEEP] didUpdateValueForCharacteristic called for %@ (%@)", peripheral.name, peripheral.identifier.UUIDString);
     NSLog(@"🔍 [DEEP] Characteristic: %@", characteristic.UUID.UUIDString);
     NSLog(@"🔍 [DEEP] Error: %@", error);
+#endif
 
     GWPeripheral *currentPeripheralModel;
     for (GWPeripheral *peripheralModel in self.connectedModelsArray) {
@@ -784,6 +786,7 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
 
     NSData *data = characteristic.value;
 
+#if HL_VERBOSE_CHUNK_LOGGING
     // DEEP INSTRUMENTATION: Log raw response data
     NSLog(@"🔍 [DEEP] Response data length: %lu bytes", (unsigned long)data.length);
     if (data) {
@@ -796,6 +799,7 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
     } else {
         NSLog(@"🔍 [DEEP] No response data received");
     }
+#endif
 
     if (!data) {
         if (currentPeripheralModel.writeCompeltion) {
@@ -810,23 +814,29 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
         result = [result stringByAppendingFormat:@"%02X",resultByte[i]];
     }
 
+#if HL_VERBOSE_CHUNK_LOGGING
     // DEEP INSTRUMENTATION: Log decoding process
     NSLog(@"🔍 [DEEP] Raw result string before decoding: %@", result);
+#endif
 
     NSArray *decodeArray = [NSString decodeResultWith:result];
 
+#if HL_VERBOSE_CHUNK_LOGGING
     // DEEP INSTRUMENTATION: Log decoded array
     NSLog(@"🔍 [DEEP] Decoded array count: %lu", (unsigned long)decodeArray.count);
     NSLog(@"🔍 [DEEP] Decoded array contents: %@", decodeArray);
+#endif
 
     NSString *decodeString = @"";
     for (int i = 0; i < decodeArray.count; i++) {
         decodeString = [decodeString stringByAppendingFormat:@"%02X", [decodeArray[i] intValue]];
     }
 
+#if HL_VERBOSE_CHUNK_LOGGING
     // DEEP INSTRUMENTATION: Log final decoded string
     NSLog(@"🔍 [DEEP] Final decoded string: %@", decodeString);
-    
+#endif
+
     NSDate *currentDateEnd = [NSDate date];
     NSTimeInterval timestampEnd = [currentDateEnd timeIntervalSince1970] * 1000; // 转换为毫秒
     NSString *timestampStringEnd = [NSString stringWithFormat:@"%.0f", timestampEnd];
@@ -844,8 +854,10 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
         return;
     }
     
+#if HL_VERBOSE_CHUNK_LOGGING
     NSLog(@"🧪🧪🧪 HLBluetoothManager COMPILED AT: %s %s", __DATE__, __TIME__);
     NSLog(@"🔍 Device type: %d, decodeString: '%@'", (int)currentPeripheralModel.deviceType, decodeString);
+#endif
 
     //区分不同设备类似的Response类型
     if(currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDM16 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDMX16 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDM32 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDU16 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDUX16 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDU32 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDUiLedBike12 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDU24 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDU20 || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDHeightAdaption || currentPeripheralModel.deviceType == BTPeripheralTypeCoolLEDC48){
