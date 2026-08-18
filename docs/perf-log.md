@@ -13,6 +13,16 @@ Grep the Xcode console for `PERF|` lines and record them here after each gate ru
 3. At steps 1a/1d and any serialization change: also send one image ad and one text ad.
 4. Record the numbers below. If the gate fails: revert the step's commit (or flip its legacy constant), re-test, note what happened.
 
+## Build numbers
+
+Every garage test build bumps `CURRENT_PROJECT_VERSION` so the installed build is
+identifiable on the phone (Version 1.0.5 (N) on the home screen / in Settings).
+
+| Build | Contains (cumulative) |
+|---|---|
+| 1 | Phase 0 instrumentation only — baseline |
+| 2 | + step 1b (log gating) + step 1a (backpressure chunk writes) |
+
 ## Results
 
 | Step (commit) | GIF | frames | packets | t_frames_ms | t_convert_ms | t_serialize_ms | t_transfer_ms | pkt_avg_ms | retries | total (stopwatch) | Notes |
