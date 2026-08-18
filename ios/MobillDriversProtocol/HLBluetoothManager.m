@@ -24,6 +24,11 @@
 // 0 keeps transfers quiet; set to 1 only when debugging the BLE chunk stream.
 #define HL_VERBOSE_CHUNK_LOGGING 0
 
+// 1 restores the pre-backpressure pacing: a fixed 10ms dispatch_after between
+// chunks. 0 drains chunks as fast as canSendWriteWithoutResponse allows and
+// resumes from peripheralIsReadyToSendWriteWithoutResponse:.
+#define HL_USE_LEGACY_CHUNK_PACING 0
+
 typedef NS_ENUM(NSUInteger, PackageSendCode) {
     PackageSendCodeSuccess = 0,
     PackageSendCodeFail = 1,
@@ -51,6 +56,14 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
 
 @property (nonatomic, copy) NSString *currentPeripheralId;
 
+// In-flight chunk state for the backpressure send path. Only one protocol
+// packet is ever in flight (stop-and-wait ACK per packet), so single-slot
+// state is sufficient; a new writeCommand: for the same packet (retry)
+// intentionally replaces it. All access is main-queue serialized (the
+// CBCentralManager is created with queue:nil).
+@property (nonatomic, strong) NSArray<NSData *> *pendingChunks;
+@property (nonatomic, assign) NSInteger pendingChunkIndex;
+@property (nonatomic, strong) GWPeripheral *pendingChunkPeripheral;
 
 @end
 
@@ -292,6 +305,40 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
     });
 }
 
+// Backpressure send path: write chunks as fast as CoreBluetooth's local queue
+// accepts them. When the queue is full, canSendWriteWithoutResponse goes NO and
+// the drain resumes from peripheralIsReadyToSendWriteWithoutResponse:.
+- (void)drainPendingChunks
+{
+    CBPeripheral *peripheral = self.pendingChunkPeripheral.peripheral;
+    CBCharacteristic *characteristic = [self.characterDictionary objectForKey:self.pendingChunkPeripheral.UUIDString];
+    if (!peripheral || !characteristic) {
+        self.pendingChunks = nil;
+        self.pendingChunkPeripheral = nil;
+        return;
+    }
+
+    while (self.pendingChunkIndex < self.pendingChunks.count) {
+        if (!peripheral.canSendWriteWithoutResponse) {
+            return; // resumed by peripheralIsReadyToSendWriteWithoutResponse:
+        }
+        NSData *chunk = self.pendingChunks[self.pendingChunkIndex];
+        self.pendingChunkIndex++;
+        [peripheral writeValue:chunk forCharacteristic:characteristic type:CBCharacteristicWriteWithoutResponse];
+    }
+
+    NSLog(@"✅ ✅ ✅ ALL CHUNKS SENT SUCCESSFULLY (backpressure path)");
+    self.pendingChunks = nil;
+    self.pendingChunkPeripheral = nil;
+}
+
+- (void)peripheralIsReadyToSendWriteWithoutResponse:(CBPeripheral *)peripheral
+{
+    if (self.pendingChunks && peripheral == self.pendingChunkPeripheral.peripheral) {
+        [self drainPendingChunks];
+    }
+}
+
 - (void)writeCommand:(NSString *)command onDevice:(GWPeripheral *)peripheralModel
 {
     NSMutableArray *arr = [NSMutableArray array];
@@ -306,8 +353,29 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
     NSString *str = [mCommad substringWithRange:NSMakeRange(0, mCommad.length)];
     [arr addObject:str];
 
+#if HL_USE_LEGACY_CHUNK_PACING
     // Send chunks with delay to prevent BLE overflow
     [self sendChunksWithDelay:arr index:0 peripheral:peripheralModel];
+#else
+    // Convert every hex chunk to bytes up front, then drain under backpressure.
+    if (self.pendingChunks && self.pendingChunkIndex < self.pendingChunks.count) {
+        // Only expected on a packet retry; the new packet replaces the stalled one.
+        NSLog(@"PERF|chunk_overwrite|remaining=%ld", (long)(self.pendingChunks.count - self.pendingChunkIndex));
+    }
+    NSMutableArray<NSData *> *chunkDatas = [NSMutableArray arrayWithCapacity:arr.count];
+    for (NSString *strTemp in arr) {
+        NSMutableData *data = [NSMutableData dataWithCapacity:strTemp.length / 2];
+        for (int i = 0; i < strTemp.length; i += 2) {
+            NSString *temp = [strTemp substringWithRange:NSMakeRange(i, 2)];
+            [data appendData:[HLUtils stringToByte:temp]];
+        }
+        [chunkDatas addObject:data];
+    }
+    self.pendingChunks = chunkDatas;
+    self.pendingChunkIndex = 0;
+    self.pendingChunkPeripheral = peripheralModel;
+    [self drainPendingChunks];
+#endif
     NSLog(@"当前方法:send============== %@", NSStringFromSelector(_cmd));
 }
 /*
