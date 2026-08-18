@@ -34,6 +34,16 @@ identifiable on the phone (Version 1.0.5 (N) on the home screen / in Settings).
 | Build 2 | adidas | 35 | 112 | 508 | 69 | 135 | 25759 | 209.6 | 0 | ~26 s | |
 | Build 2 | nike (repeat) | 40 | 157 | 692 | 85 | 140 | 32469 | 187.2 | 0 | display showed in ~1–2 s | **Device answered `0201` at begin (CRC cache hit) and displayed instantly; app re-uploaded 157 packets anyway** |
 
+| Build 3 (1c+1d, 72025a0) | nike | 40 | 157 | 487 | 90 | 141 | 29944 | 186.8 (min 113.3) | 0 | ~30 s | logs/202608180705.log |
+| Build 3 | prada | 30 | 133 | 481 | 75 | 108 | 18524 | 135.7 (min 113.4) | 0 | ~19 s | |
+| Build 3 | adidas | 35 | 112 | 408 | 67 | 124 | 25974 | 228.3 (min 89.4) | 0 | ~26 s | |
+
+### Build 3 conclusions — transport optimization has hit the protocol floor
+- Step 1c (no 15 ms post-ACK delay) also produced **no change**: totals identical to build 2 run-to-run. Like the chunk pacing, the delay was absorbed by connection-interval alignment. Kept (harmless, correct).
+- Only one >500 ms stall per transfer, always packet 0 → packet 1 (~1.1–1.4 s): device-side storage preparation, not app-side. No periodic main-thread stalls — the dedicated-BLE-queue idea is low-value; dropped.
+- Per-packet cost is radio/firmware-quantized: ~113 ms best, 135–230 ms session-dependent. **First-time sends are floor-bound at roughly packets × ~120-230 ms** (nike: ~19–30 s). LZSS already achieves 79% on nike; the encoder already emits RGB444, so pre-quantization gains nothing. No further app-side transport lever exists for first-time sends within this protocol.
+- The remaining transformative wins are protocol-level: **`0201` CRC skip** (repeat sends → ~1–2 s; production ads repeat constantly) and **program slots 0–8** (preload rotation, switch in ms).
+
 ### Build 2 conclusions
 - Step 1a (backpressure) produced **no speedup**: the 10 ms chunk pacing had been overlapping radio transmission, not extending it. Kept anyway (correct mechanism, 0 retries, no cost).
 - Per-packet floor is ~97–120 ms (connection-interval + device ACK). Inter-packet gap distribution is bimodal: ~76 packets at 90–180 ms, ~61 at 210–330 ms (missed connection events / main-thread contention), max 1.37 s.
