@@ -17,6 +17,9 @@ const loadNotificationService = async () => {
 
 const API_BASE_URL = 'https://api.mobill.com';
 
+// Ad requests start this far apart, measured from the start of the previous request
+const AD_REQUEST_INTERVAL_MS = 15000;
+
 export interface DriverEarnings {
   today: string;
   this_month: string;
@@ -60,7 +63,9 @@ export interface AdResponse {
 }
 
 class AdServiceClass {
-  private backgroundInterval: NodeJS.Timeout | null = null;
+  private nextFetchTimer: number | null = null;
+  private lastRequestStartedAt: number | null = null;
+  private isFetchingPaused: boolean = false;
   private isAdServingActive: boolean = false;
   private onAdReceived?: (ad: AdResponse) => void;
   private onEarningsUpdated?: (earnings: DriverEarnings) => void;
@@ -234,6 +239,8 @@ class AdServiceClass {
 
   private async fetchAndProcessAdWithTimer(): Promise<void> {
     try {
+      this.lastRequestStartedAt = Date.now();
+
       // Always fetch fresh coordinates for each ad request
       console.log('🎯 Fetching fresh coordinates for serve-ad...');
       let coordinates = await BackgroundLocationService.getCurrentPosition();
@@ -270,13 +277,8 @@ class AdServiceClass {
 
         console.log(`First ad fetched successfully: ${adData.ad_id}, Campaign: ${adData.campaign_id}`);
 
-        // Start the 15-second timer only after first ad is successfully received
-        if (!this.backgroundInterval && this.isAdServingActive) {
-          this.backgroundInterval = BackgroundTimer.setInterval(() => {
-            this.fetchAndProcessAd();
-          }, 15000);
-          console.log('Timer started - fetching ads every 15 seconds (background-enabled)');
-        }
+        // Start the 15-second cadence only after first ad is successfully received
+        this.scheduleNextFetch();
       } else {
         this.initialFetchRetryCount++;
         console.warn(`Failed to fetch first ad (attempt ${this.initialFetchRetryCount}), retrying in 5 seconds...`);
@@ -308,10 +310,9 @@ class AdServiceClass {
   }
 
   async stopAdServing(): Promise<void> {
-    if (this.backgroundInterval) {
-      BackgroundTimer.clearInterval(this.backgroundInterval);
-      this.backgroundInterval = null;
-    }
+    this.clearNextFetch();
+    this.lastRequestStartedAt = null;
+    this.isFetchingPaused = false;
 
     if (this.appStateSubscription) {
       this.appStateSubscription.remove();
@@ -344,26 +345,47 @@ class AdServiceClass {
 
   /**
    * Pause ad fetching temporarily (e.g., while content is being processed/displayed)
-   * This stops the 15-second timer to prevent new ad requests
+   * This cancels the next scheduled request so none is made during a send
    */
   pauseAdFetching(): void {
-    if (this.backgroundInterval) {
-      BackgroundTimer.clearInterval(this.backgroundInterval);
-      this.backgroundInterval = null;
-      console.log('⏸️ Ad fetching paused - timer cleared');
-    }
+    this.isFetchingPaused = true;
+    this.clearNextFetch();
+    console.log('⏸️ Ad fetching paused - timer cleared');
   }
 
   /**
    * Resume ad fetching after content display is complete
-   * Restarts the 15-second timer for the next ad request
+   * The next request keeps the 15-second cadence from the previous request's
+   * start; if the send ran past that, it goes out immediately
    */
   resumeAdFetching(): void {
-    if (this.isAdServingActive && !this.backgroundInterval) {
-      this.backgroundInterval = BackgroundTimer.setInterval(() => {
+    this.isFetchingPaused = false;
+    if (this.isAdServingActive && this.nextFetchTimer === null) {
+      this.scheduleNextFetch();
+      console.log('▶️ Ad fetching resumed');
+    }
+  }
+
+  private scheduleNextFetch(): void {
+    if (!this.isAdServingActive || this.isFetchingPaused) {
+      return;
+    }
+    this.clearNextFetch();
+    const elapsed = this.lastRequestStartedAt ? Date.now() - this.lastRequestStartedAt : 0;
+    const delay = Math.max(0, AD_REQUEST_INTERVAL_MS - elapsed);
+    this.nextFetchTimer = BackgroundTimer.setTimeout(() => {
+      this.nextFetchTimer = null;
+      if (this.isAdServingActive && !this.isFetchingPaused) {
         this.fetchAndProcessAd();
-      }, 15000);
-      console.log('▶️ Ad fetching resumed - timer restarted (15 seconds)');
+      }
+    }, delay);
+    console.log(`⏱️ Next ad request in ${(delay / 1000).toFixed(1)}s`);
+  }
+
+  private clearNextFetch(): void {
+    if (this.nextFetchTimer !== null) {
+      BackgroundTimer.clearTimeout(this.nextFetchTimer);
+      this.nextFetchTimer = null;
     }
   }
 
@@ -380,6 +402,7 @@ class AdServiceClass {
   }
 
   private async fetchAndProcessAd(): Promise<void> {
+    this.lastRequestStartedAt = Date.now();
     try {
       // Always fetch fresh coordinates for each ad request
       console.log('🎯 Fetching fresh coordinates for serve-ad...');
@@ -422,6 +445,9 @@ class AdServiceClass {
     } catch (error) {
       console.error('Error in fetchAndProcessAd:', error);
     }
+
+    // No-op while a send is in progress; resumeAdFetching() schedules it then
+    this.scheduleNextFetch();
   }
 }
 
