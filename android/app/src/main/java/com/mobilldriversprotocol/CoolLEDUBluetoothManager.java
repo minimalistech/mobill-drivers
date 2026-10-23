@@ -19,6 +19,7 @@ import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Handler;
+import android.os.Looper;
 import android.util.Log;
 
 import java.util.ArrayList;
@@ -477,6 +478,13 @@ public class CoolLEDUBluetoothManager {
      * iOS uses 360 hex chars = 180 bytes per chunk with 10ms delay
      */
     public void write(byte[] data, WriteCallback writeCallback) {
+        // The write queue and chunk state are only touched on the main thread; callers
+        // include a worker thread and Binder threads (notification handlers)
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            mainHandler.post(() -> write(data, writeCallback));
+            return;
+        }
+
         if (!isConnected || writeCharacteristic == null) {
             Log.e(TAG, "Not connected or write characteristic not available");
             if (writeCallback != null) {
@@ -894,6 +902,11 @@ public class CoolLEDUBluetoothManager {
         
         @Override
         public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            // Delivered on a Binder thread; handle on main with the rest of the write state
+            if (Looper.myLooper() != Looper.getMainLooper()) {
+                mainHandler.post(() -> onCharacteristicWrite(gatt, characteristic, status));
+                return;
+            }
             // Capture session ID at callback time to detect stale callbacks
             final int callbackSessionId = chunkingSessionId;
 
