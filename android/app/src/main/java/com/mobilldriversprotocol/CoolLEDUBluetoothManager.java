@@ -12,8 +12,12 @@ import android.bluetooth.BluetoothProfile;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanResult;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.os.Build;
 import android.os.Handler;
 import android.util.Log;
 
@@ -42,9 +46,14 @@ public class CoolLEDUBluetoothManager {
     private static final String PREFS_NAME = "CoolLEDUBluetoothPrefs";
     private static final String PREF_LAST_CONNECTED_DEVICES = "lastConnectedDevices";
 
-    // Auto-reconnection settings
-    private static final int MAX_RECONNECT_ATTEMPTS = 3;
-    private static final int RECONNECT_DELAY_MS = 2000;  // 2 seconds between attempts
+    // Auto-reconnection settings. The first attempt is a fast direct connect; after
+    // that a background autoConnect request stays pending (no timeout) until the
+    // display advertises again.
+    private static final int FIRST_RECONNECT_DELAY_MS = 1000;
+    private static final int RECONNECT_DELAY_MS = 2000;
+    private static final int MAX_RECONNECT_DELAY_MS = 30000;
+    // Service discovery + MTU + CCCD must finish within this time after the link is up
+    private static final int SETUP_TIMEOUT_MS = 15000;
     
     private BluetoothManager bluetoothManager;
     private BluetoothAdapter bluetoothAdapter;
@@ -88,6 +97,12 @@ public class CoolLEDUBluetoothManager {
     private int reconnectAttempts = 0;
     private boolean isReconnecting = false;
     private boolean userInitiatedDisconnect = false;  // Track if disconnect was user-initiated
+    // True from an unexpected drop until reconnected or the user disconnects
+    private volatile boolean autoReconnectActive = false;
+    // Whether the pending GATT connect was made with autoConnect=true
+    private boolean pendingConnectIsBackground = false;
+    private final Runnable reconnectRunnable = this::runReconnect;
+    private final Runnable setupWatchdog = this::onSetupTimeout;
 
     public interface CoolLEDUManagerCallback {
         void onDeviceDiscovered(BluetoothDevice device, int rssi);
@@ -113,6 +128,56 @@ public class CoolLEDUBluetoothManager {
         if (bluetoothAdapter != null) {
             bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
         }
+
+        IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(adapterStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            context.registerReceiver(adapterStateReceiver, filter);
+        }
+    }
+
+    /**
+     * Bluetooth being switched off does not reliably deliver onConnectionStateChange,
+     * so tear the link down here and resume reconnection when it comes back on.
+     */
+    private final BroadcastReceiver adapterStateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context ctx, Intent intent) {
+            int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR);
+            if (state == BluetoothAdapter.STATE_TURNING_OFF || state == BluetoothAdapter.STATE_OFF) {
+                mainHandler.post(() -> handleAdapterOff());
+            } else if (state == BluetoothAdapter.STATE_ON) {
+                mainHandler.post(() -> handleAdapterOn());
+            }
+        }
+    };
+
+    private void handleAdapterOff() {
+        Log.w(TAG, "Bluetooth adapter turning off");
+        mainHandler.removeCallbacks(reconnectRunnable);
+        isScanning = false;
+        boolean wasConnected = isConnected;
+        BluetoothDevice device = bluetoothGatt != null ? bluetoothGatt.getDevice() : lastConnectedDevice;
+        if (bluetoothGatt == null && !wasConnected) {
+            return;
+        }
+        if (!userInitiatedDisconnect && lastConnectedDevice != null) {
+            autoReconnectActive = true;
+        }
+        disconnectInternal();
+        if (wasConnected && device != null) {
+            callback.onDeviceDisconnected(device, -1);
+        }
+    }
+
+    private void handleAdapterOn() {
+        Log.d(TAG, "Bluetooth adapter on");
+        bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+        if (autoReconnectActive) {
+            reconnectAttempts = 0;
+            attemptReconnect();
+        }
     }
     
     public boolean isBluetoothEnabled() {
@@ -129,6 +194,14 @@ public class CoolLEDUBluetoothManager {
             return;
         }
         
+        if (bluetoothLeScanner == null) {
+            bluetoothLeScanner = bluetoothAdapter.getBluetoothLeScanner();
+            if (bluetoothLeScanner == null) {
+                callback.onError("BLE scanner unavailable");
+                return;
+            }
+        }
+
         discoveredDevices.clear();
         isScanning = true;
         bluetoothLeScanner.startScan(scanCallback);
@@ -151,14 +224,14 @@ public class CoolLEDUBluetoothManager {
     }
     
     public void connectToDevice(BluetoothDevice device) {
-        connect(device);
+        connect(device, false);
     }
 
     /**
      * Connect to a device (internal method used by both manual and auto-connect)
      * Thread-safe - prevents duplicate GATT connections
      */
-    private synchronized void connect(BluetoothDevice device) {
+    private synchronized void connect(BluetoothDevice device, boolean background) {
         // Check if already connected to same device
         if (isConnected) {
             if (lastConnectedDevice != null && lastConnectedDevice.getAddress().equals(device.getAddress())) {
@@ -182,8 +255,16 @@ public class CoolLEDUBluetoothManager {
         userInitiatedDisconnect = false;
         isReconnecting = false;
 
-        Log.d(TAG, "Connecting to device: " + device.getName());
-        bluetoothGatt = device.connectGatt(context, false, gattCallback);
+        pendingConnectIsBackground = background;
+        Log.d(TAG, "Connecting to device: " + device.getName() + (background ? " (background autoConnect)" : ""));
+        bluetoothGatt = device.connectGatt(context, background, gattCallback, BluetoothDevice.TRANSPORT_LE);
+        if (bluetoothGatt == null) {
+            Log.e(TAG, "connectGatt returned null");
+            isConnectionInProgress = false;
+            if (autoReconnectActive) {
+                attemptReconnect();
+            }
+        }
     }
     
     /**
@@ -192,6 +273,8 @@ public class CoolLEDUBluetoothManager {
      */
     public void disconnect() {
         userInitiatedDisconnect = true;
+        autoReconnectActive = false;
+        mainHandler.removeCallbacks(reconnectRunnable);
         disconnectInternal();
         // Remove from last connected devices when user explicitly disconnects
         if (lastConnectedDevice != null) {
@@ -203,6 +286,7 @@ public class CoolLEDUBluetoothManager {
      * Internal disconnect method
      */
     private synchronized void disconnectInternal() {
+        mainHandler.removeCallbacks(setupWatchdog);
         if (bluetoothGatt != null) {
             bluetoothGatt.disconnect();
             bluetoothGatt.close();
@@ -260,43 +344,68 @@ public class CoolLEDUBluetoothManager {
     }
 
     /**
-     * Attempt to reconnect to the last connected device
-     * Uses exponential backoff with max attempts
+     * Attempt to reconnect to the last connected device.
+     * Keeps trying until reconnected or the user disconnects: the first attempt is a
+     * direct connect, later ones a background autoConnect that never times out.
      */
     private void attemptReconnect() {
-        if (lastConnectedDevice == null || userInitiatedDisconnect) {
+        if (lastConnectedDevice == null || userInitiatedDisconnect || !autoReconnectActive) {
             Log.d(TAG, "🔄 Skipping reconnect: " +
-                  (lastConnectedDevice == null ? "no last device" : "user-initiated disconnect"));
+                  (lastConnectedDevice == null ? "no last device" : "user-initiated disconnect or not reconnecting"));
             return;
         }
 
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Log.w(TAG, "🔄 Max reconnect attempts reached (" + MAX_RECONNECT_ATTEMPTS + "), giving up");
-            isReconnecting = false;
-            reconnectAttempts = 0;
+        if (isConnected || isConnectionInProgress) {
             return;
         }
 
-        if (isConnected || isReconnecting) {
+        if (!isBluetoothEnabled()) {
+            // Resumed by handleAdapterOn()
+            Log.d(TAG, "🔄 Bluetooth off, waiting for it to come back before reconnecting");
             return;
         }
 
         isReconnecting = true;
         reconnectAttempts++;
 
-        // Calculate delay with exponential backoff
-        int delay = RECONNECT_DELAY_MS * reconnectAttempts;
+        // Back off when attempts fail immediately (e.g. repeated status 133)
+        int delay = reconnectAttempts == 1
+            ? FIRST_RECONNECT_DELAY_MS
+            : Math.min(RECONNECT_DELAY_MS * (reconnectAttempts - 1), MAX_RECONNECT_DELAY_MS);
         Log.d(TAG, "🔄 Attempting reconnect #" + reconnectAttempts + " in " + delay + "ms to " + lastConnectedDevice.getName());
 
-        mainHandler.postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                if (!isConnected && !userInitiatedDisconnect && lastConnectedDevice != null) {
-                    Log.d(TAG, "🔄 Reconnecting to: " + lastConnectedDevice.getName());
-                    connect(lastConnectedDevice);
-                }
-            }
-        }, delay);
+        mainHandler.removeCallbacks(reconnectRunnable);
+        mainHandler.postDelayed(reconnectRunnable, delay);
+    }
+
+    private void runReconnect() {
+        isReconnecting = false;
+        if (!isConnected && !userInitiatedDisconnect && autoReconnectActive && lastConnectedDevice != null) {
+            Log.d(TAG, "🔄 Reconnecting to: " + lastConnectedDevice.getName());
+            connect(lastConnectedDevice, reconnectAttempts > 1);
+        }
+    }
+
+    /**
+     * The link came up but setup (services, MTU, CCCD) never completed. Without this
+     * isConnectionInProgress stays true and blocks every later connect.
+     */
+    private void onSetupTimeout() {
+        if (isConnected || bluetoothGatt == null) {
+            return;
+        }
+        Log.w(TAG, "⏱️ Connection setup timed out, resetting GATT");
+        failConnectionSetup();
+    }
+
+    private synchronized void failConnectionSetup() {
+        boolean wasReconnecting = autoReconnectActive;
+        disconnectInternal();
+        if (wasReconnecting) {
+            attemptReconnect();
+        } else {
+            callback.onError("Connection setup failed");
+        }
     }
 
     /**
@@ -320,6 +429,8 @@ public class CoolLEDUBluetoothManager {
             isConnectionInProgress = false;  // Connection complete
             isReconnecting = false;
             reconnectAttempts = 0;
+            autoReconnectActive = false;
+            mainHandler.removeCallbacks(setupWatchdog);
             userInitiatedDisconnect = false;  // Reset for future disconnects
             lastConnectedDevice = gatt.getDevice();
 
@@ -561,13 +672,26 @@ public class CoolLEDUBluetoothManager {
 
                     // Auto-connect to previously connected devices (like iOS kLastConnectedPeripheral)
                     // This matches iOS behavior in centralManager:didDiscoverPeripheral:
+                    // A background autoConnect can be slow to fire; once a scan sees the
+                    // display, replace it with a direct connect
+                    if (!isConnected && autoReconnectActive && isConnectionInProgress && pendingConnectIsBackground
+                            && lastConnectedDevice != null && lastConnectedDevice.getAddress().equals(device.getAddress())) {
+                        Log.d(TAG, "🔄 Saw " + deviceName + " during background reconnect, switching to direct connect");
+                        mainHandler.post(() -> {
+                            if (!isConnected && pendingConnectIsBackground) {
+                                disconnectInternal();
+                                connect(device, false);
+                            }
+                        });
+                        return;
+                    }
                     if (!isConnected && !isReconnecting && !isConnectionInProgress && isLastConnectedDevice(device.getAddress())) {
                         Log.d(TAG, "🔄 Auto-connecting to previously connected device: " + deviceName);
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
                                 // connect() is now synchronized and will check isConnectionInProgress
-                                connect(device);
+                                connect(device, false);
                             }
                         });
                     }
@@ -585,8 +709,16 @@ public class CoolLEDUBluetoothManager {
     private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            if (gatt != bluetoothGatt) {
+                // Callback from a GATT client we already closed
+                Log.d(TAG, "Ignoring state change from stale GATT (newState=" + newState + ", status=" + status + ")");
+                gatt.close();
+                return;
+            }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.d(TAG, "Connected to GATT server, discovering services...");
+                mainHandler.removeCallbacks(setupWatchdog);
+                mainHandler.postDelayed(setupWatchdog, SETUP_TIMEOUT_MS);
                 // Don't set isConnected or notify callback yet - wait for service discovery
                 gatt.discoverServices();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
@@ -598,6 +730,7 @@ public class CoolLEDUBluetoothManager {
                       ", userInitiated=" + userInitiatedDisconnect + ", status=" + status + ")");
 
                 // Reset connection state
+                mainHandler.removeCallbacks(setupWatchdog);
                 isConnected = false;
                 isConnectionInProgress = false;  // Reset connection in progress flag
                 mtuChangeCompleted = false;
@@ -616,11 +749,15 @@ public class CoolLEDUBluetoothManager {
                     callback.onDeviceDisconnected(device, status);
                 }
 
-                // Attempt auto-reconnect if this was an unexpected disconnect
-                // (not user-initiated and device was previously connected)
-                if (!userInitiatedDisconnect && wasConnected) {
+                // Attempt auto-reconnect after an unexpected drop, and keep retrying
+                // when a reconnect attempt itself fails (status 133, timeout)
+                if (!userInitiatedDisconnect && (wasConnected || autoReconnectActive)) {
                     Log.d(TAG, "🔄 Unexpected disconnect detected, will attempt auto-reconnect");
-                    lastConnectedDevice = device;
+                    if (wasConnected) {
+                        lastConnectedDevice = device;
+                        reconnectAttempts = 0;
+                    }
+                    autoReconnectActive = true;
                     attemptReconnect();
                 }
             }
@@ -654,12 +791,17 @@ public class CoolLEDUBluetoothManager {
                     } else {
                         Log.e(TAG, "FFF1 characteristic not found!");
                         callback.onError("CoolLEDU characteristic not found");
+                        mainHandler.post(() -> failConnectionSetup());
                     }
 
                     Log.d(TAG, "CoolLEDU service characteristics ready");
                 } else {
                     callback.onError("CoolLEDU service not found");
+                    mainHandler.post(() -> failConnectionSetup());
                 }
+            } else {
+                Log.e(TAG, "Service discovery failed with status: " + status);
+                mainHandler.post(() -> failConnectionSetup());
             }
         }
 
@@ -835,5 +977,10 @@ public class CoolLEDUBluetoothManager {
     public void cleanup() {
         stopScan();
         disconnect();
+        try {
+            context.unregisterReceiver(adapterStateReceiver);
+        } catch (IllegalArgumentException e) {
+            // Already unregistered
+        }
     }
 }
