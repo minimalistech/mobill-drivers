@@ -609,6 +609,8 @@ public class CoolLEDUBluetoothManager {
 
         if (chunks == null) {
             Log.e(TAG, "❌ writeNextChunk called but chunks is null!");
+            isWriteInProgress = false;
+            processNextQueuedWrite();
             return;
         }
 
@@ -640,6 +642,9 @@ public class CoolLEDUBluetoothManager {
                 chunkingCallback = null;
             }
             chunks = null;
+            // Without this every later write queues behind a write that never completes
+            isWriteInProgress = false;
+            processNextQueuedWrite();
         }
         // onCharacteristicWrite callback will call writeNextChunk() for next chunk
     }
@@ -650,8 +655,23 @@ public class CoolLEDUBluetoothManager {
             return false;
         }
         
+        if (!isConnected || writeCharacteristic == null) {
+            return false;
+        }
+
+        // Go through the write queue so commands never interleave with a chunked transfer
         byte[] data = hexStringToByteArray(hexCommand);
-        return writeData(data);
+        write(data, new WriteCallback() {
+            @Override
+            public void onWriteSuccess() {
+            }
+
+            @Override
+            public void onWriteFailure(String error) {
+                Log.e(TAG, "Command write failed: " + error);
+            }
+        });
+        return true;
     }
     
     private final ScanCallback scanCallback = new ScanCallback() {
@@ -908,13 +928,15 @@ public class CoolLEDUBluetoothManager {
                     } else {
                         // All chunks completed for this session
                         Log.d(TAG, "🎉 All chunks sent for session " + callbackSessionId + " (current session: " + chunkingSessionId + ")");
-                        // Call the callback if it exists, but DON'T clear it
-                        // The next write session will overwrite it
-                        if (chunkingCallback != null) {
-                            chunkingCallback.onWriteSuccess();
+                        // Clear the session before calling back so a later write
+                        // completion can't re-enter this branch and fire it again
+                        WriteCallback completedCallback = chunkingCallback;
+                        chunkingCallback = null;
+                        chunks = null;
+                        if (completedCallback != null) {
+                            completedCallback.onWriteSuccess();
                             Log.d(TAG, "✅ Called chunkingCallback.onWriteSuccess() for session " + callbackSessionId);
                         }
-                        // Don't null callback or chunks - let next session overwrite them
                         // Process next queued write
                         isWriteInProgress = false;
                         processNextQueuedWrite();
