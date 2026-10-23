@@ -104,6 +104,19 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
     }
 
     /**
+     * Called when the React instance is torn down (e.g. reload). Without this the old
+     * GATT client stays open and holds the link to the display.
+     */
+    @Override
+    public void invalidate() {
+        if (bluetoothManager != null) {
+            bluetoothManager.release();
+            bluetoothManager = null;
+        }
+        super.invalidate();
+    }
+
+    /**
      * Initialize Bluetooth manager lazily (like iOS ensureBluetoothManagerInitialized)
      */
     private void ensureBluetoothManagerInitialized() {

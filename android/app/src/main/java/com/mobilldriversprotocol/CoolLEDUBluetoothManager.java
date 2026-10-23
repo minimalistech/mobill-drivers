@@ -977,6 +977,23 @@ public class CoolLEDUBluetoothManager {
     public void cleanup() {
         stopScan();
         disconnect();
+        unregisterAdapterReceiver();
+    }
+
+    /**
+     * Close the GATT client without forgetting the saved device, so a new
+     * instance (e.g. after a React Native reload) can auto-reconnect to it.
+     */
+    public void release() {
+        stopScan();
+        userInitiatedDisconnect = true;
+        autoReconnectActive = false;
+        mainHandler.removeCallbacks(reconnectRunnable);
+        disconnectInternal();
+        unregisterAdapterReceiver();
+    }
+
+    private void unregisterAdapterReceiver() {
         try {
             context.unregisterReceiver(adapterStateReceiver);
         } catch (IllegalArgumentException e) {
