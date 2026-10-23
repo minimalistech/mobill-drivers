@@ -205,7 +205,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout, onOpenDebug }) => {
           if (bleScanStarted) {
             console.log('✅ Continuous BLE scanning started successfully');
 
-            // Subscribe to BLE scan results
+            // Subscribe to BLE scan results, replacing any listener left from a
+            // previous connection so results aren't double-counted after reconnects
+            bleSubscriptionRef.current?.remove();
             bleSubscriptionRef.current = manager.onBLEScanResults((scanResult: BLEScanResult) => {
               console.log(`📡 BLE scan results received: ${scanResult.devices.length} devices`);
               AdService.addBLEScanResults(scanResult);
