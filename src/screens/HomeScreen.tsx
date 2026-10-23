@@ -231,9 +231,13 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout, onOpenDebug }) => {
         connectedAtRef.current = null;
         setIsDisplayConnected(false);
 
-        // Stop background location tracking when display disconnects
-        console.log('🎯 Stopping background location tracking - display disconnected');
-        await BackgroundLocationService.stopLocationTracking();
+        // Keep location tracking through an unintended outage: on Android its
+        // foreground service is the only thing keeping the process at high priority
+        // while it reconnects. Ad requests stop below, so no locations are reported.
+        if (userInitiatedShutdownRef.current) {
+          console.log('🎯 Stopping background location tracking - display turned off');
+          await BackgroundLocationService.stopLocationTracking();
+        }
 
         // Stop continuous BLE scanning
         console.log('📡 Stopping continuous BLE scanning - display disconnected');
