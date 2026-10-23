@@ -99,23 +99,8 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
         self.characterDictionary = [NSMutableDictionary dictionary];
         self.charMap = [NSMutableDictionary dictionary];
         self.packageDictM = [NSMutableDictionary dictionary];
-        
-        //订阅键盘通知
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(stopScanPeripheral) name:UIKeyboardWillShowNotification object:nil];
-        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(startScanPeripheral) name:UIKeyboardWillHideNotification object:nil];
     }
     return self;
-}
-
-#pragma mark - notification events
-- (void)stopScanPeripheral
-{
-    [self.manager stopScan];
-}
-
-- (void)startScanPeripheral
-{
-    [self.manager scanForPeripheralsWithServices:nil options:@{CBCentralManagerScanOptionAllowDuplicatesKey:@YES}];
 }
 
 #pragma mark - public methods
