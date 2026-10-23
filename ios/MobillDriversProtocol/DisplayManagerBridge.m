@@ -41,6 +41,8 @@ static NSString * const MOBILL_DRIVERS_VERSION = @"2.96";
 @property (nonatomic, strong) ColorItemModel32 *pendingAnimationModel;
 // Session for ad content downloads, with a total time limit per download
 @property (nonatomic, strong) NSURLSession *contentSession;
+// Downloaded ad content by URL, kept for the app session (memory only)
+@property (nonatomic, strong) NSCache<NSString *, NSData *> *contentCache;
 @property (nonatomic, strong) NSTimer *scanTimeoutTimer;
 @property (nonatomic, assign) BOOL isScanActive;
 // Continuous BLE scanning for impression tracking
@@ -1510,6 +1512,17 @@ static const NSTimeInterval kContentDownloadTimeout = 8.0;
         return nil;
     }
 
+    // Ads repeat every few cycles; assumes the backend never changes the file behind a URL
+    if (!self.contentCache) {
+        self.contentCache = [[NSCache alloc] init];
+        self.contentCache.totalCostLimit = 20 * 1024 * 1024;
+    }
+    NSData *cached = [self.contentCache objectForKey:urlString];
+    if (cached) {
+        NSLog(@"PERF|download|cache_hit|bytes=%lu", (unsigned long)cached.length);
+        return cached;
+    }
+
     if (!self.contentSession) {
         NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
         config.timeoutIntervalForRequest = kContentDownloadTimeout;
@@ -1537,6 +1550,9 @@ static const NSTimeInterval kContentDownloadTimeout = 8.0;
 
     NSLog(@"PERF|download|ok=%d|bytes=%lu|t_ms=%.0f", result != nil, (unsigned long)result.length,
           (CFAbsoluteTimeGetCurrent() - start) * 1000.0);
+    if (result) {
+        [self.contentCache setObject:result forKey:urlString cost:result.length];
+    }
     return result;
 }
 

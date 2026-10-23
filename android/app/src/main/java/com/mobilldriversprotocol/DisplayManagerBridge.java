@@ -8,6 +8,7 @@ import android.graphics.BitmapFactory;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.util.LruCache;
 
 import com.facebook.react.bridge.*;
 import com.facebook.react.modules.core.DeviceEventManagerModule;
@@ -692,11 +693,26 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
     // up the ad cycle (ad requests are paused while content is being sent)
     private static final int CONTENT_DOWNLOAD_TIMEOUT_MS = 8000;
 
+    // Downloaded ad content by URL, kept for the app session (memory only).
+    // Ads repeat every few cycles; assumes the backend never changes the file behind a URL.
+    private final LruCache<String, byte[]> contentCache = new LruCache<String, byte[]>(20 * 1024 * 1024) {
+        @Override
+        protected int sizeOf(String key, byte[] value) {
+            return value.length;
+        }
+    };
+
     /**
      * Download ad content synchronously (callers run off the main thread).
      * Returns null on network error, timeout, non-2xx status or empty body.
      */
     private byte[] fetchContentData(String urlString) {
+        byte[] cached = contentCache.get(urlString);
+        if (cached != null) {
+            Log.d(TAG, "PERF|download|cache_hit|bytes=" + cached.length);
+            return cached;
+        }
+
         long start = System.currentTimeMillis();
         HttpURLConnection connection = null;
         try {
@@ -726,7 +742,11 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
 
             byte[] data = buffer.toByteArray();
             Log.d(TAG, "PERF|download|ok=1|bytes=" + data.length + "|t_ms=" + (System.currentTimeMillis() - start));
-            return data.length > 0 ? data : null;
+            if (data.length == 0) {
+                return null;
+            }
+            contentCache.put(urlString, data);
+            return data;
         } catch (Exception e) {
             Log.e(TAG, "Content download failed: " + urlString + " (" + e.getMessage() + ")");
             return null;
