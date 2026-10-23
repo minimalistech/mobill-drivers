@@ -1452,67 +1452,22 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     // First check our internal reference
     if (self.connectedDevice != nil) {
 
-        // The most important check is the CoreBluetooth state - if it's connected, the device is connected regardless of GWPeripheralState
+        // The most important check is the CoreBluetooth state - if it's connected, the device is connected regardless of GWPeripheralState.
+        // No ping is written here: the old "010001" ping declared a 256-byte frame
+        // but carried 1 byte, and was sent right before every begin command.
         if (self.connectedDevice.peripheral.state == CBPeripheralStateConnected) {
+            deviceConnected = YES;
 
-            // Try a more active test - attempt to send a minimal command
-            BOOL activeTestSucceeded = NO;
-            @try {
-                NSString *pingCmd = @"010001"; // Simple ON command as a ping
-                NSString *finalPingCmd = [NSString finalDataWith:pingCmd];
-
-                // Use HLBluetoothManager directly to avoid our own wrapper methods
-                [[HLBluetoothManager standardManager] writeCommand:finalPingCmd onDevice:self.connectedDevice];
-                // If we reach here without exception, consider it successful
-                activeTestSucceeded = YES;
-            } @catch (NSException *exception) {
-                activeTestSucceeded = NO;
-            }
-
-            if (activeTestSucceeded) {
-                deviceConnected = YES;
-
-                // If the GWPeripheral state doesn't agree with CoreBluetooth state, fix it
-                if (self.connectedDevice.state != GWPeripheralStateVerifySuccess) {
-                    self.connectedDevice.state = GWPeripheralStateVerifySuccess;
-                }
-            } else {
-                // Force device to register as disconnected
-                [self.connectedDevice disconnect];
-
-                // We can't directly cancel the CoreBluetooth connection, so just log it
-
-                deviceConnected = NO;
+            // If the GWPeripheral state doesn't agree with CoreBluetooth state, fix it
+            if (self.connectedDevice.state != GWPeripheralStateVerifySuccess) {
+                self.connectedDevice.state = GWPeripheralStateVerifySuccess;
             }
         }
-        // Also accept certain GWPeripheral states as valid connections, but still do an active test
+        // Also accept certain GWPeripheral states as valid connections
         else if (self.connectedDevice.state == GWPeripheralStateConnected ||
                  self.connectedDevice.state == GWPeripheralStateVerifySuccess ||
                  self.connectedDevice.state == GWPeripheralStateDefaultVerify) {
-
-            // Try a more active test - attempt to send a minimal command
-            BOOL activeTestSucceeded = NO;
-            @try {
-                NSString *pingCmd = @"010001"; // Simple ON command as a ping
-                NSString *finalPingCmd = [NSString finalDataWith:pingCmd];
-
-                // Use HLBluetoothManager directly to avoid our own wrapper methods
-                [[HLBluetoothManager standardManager] writeCommand:finalPingCmd onDevice:self.connectedDevice];
-                // If we reach here without exception, consider it successful
-                activeTestSucceeded = YES;
-            } @catch (NSException *exception) {
-                activeTestSucceeded = NO;
-            }
-
-            if (activeTestSucceeded) {
-                deviceConnected = YES;
-            } else {
-                // Force device to register as disconnected
-                [self.connectedDevice disconnect];
-
-
-                deviceConnected = NO;
-            }
+            deviceConnected = YES;
         }
     }
 
@@ -1549,19 +1504,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
         }
     }
 
-    // If we still don't have a connection and our internal reference exists,
-    // try to reconnect the device
-    if (!deviceConnected && self.connectedDevice != nil) {
-
-        // Attempt to reconnect in the background
-        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-            [self.connectedDevice connect];
-        });
-    }
-
-    if (deviceConnected) {
-    } else {
-    }
+    // Reconnection after a drop is handled by HLBluetoothManager's pending connect
 
     return deviceConnected;
 }
