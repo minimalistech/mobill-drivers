@@ -386,6 +386,15 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
 
 - (void)writeCommand:(NSString *)command onDevice:(GWPeripheral *)peripheralModel
 {
+    // pendingChunks is main-queue state (see above); DisplayManagerBridge calls in
+    // from React Native's module queue, so hop to main to keep writes serialized
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self writeCommand:command onDevice:peripheralModel];
+        });
+        return;
+    }
+
     NSMutableArray *arr = [NSMutableArray array];
     NSMutableString *mCommad = [NSMutableString stringWithString:command];
 

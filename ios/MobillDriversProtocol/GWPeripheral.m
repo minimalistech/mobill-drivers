@@ -482,6 +482,14 @@
 
 - (void)writeCommandModel:(HLPackageSendModel *)packageModel completion:(SendCompletion)completion
 {
+    // Package state is also driven by ACK handling and the retry timer on main
+    if (![NSThread isMainThread]) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self writeCommandModel:packageModel completion:completion];
+        });
+        return;
+    }
+
     _packageModel = packageModel;
     _sendCompletion = completion;
 
