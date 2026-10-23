@@ -16,6 +16,7 @@ class BackgroundLocationServiceClass {
   private isTracking: boolean = false;
   private currentPosition: Coordinates | null = null;
   private currentPositionTime: number | null = null;
+  private currentSpeed: number | null = null; // m/s, from the latest fix that reported one
 
   private getConfig() {
     return {
@@ -120,6 +121,9 @@ class BackgroundLocationServiceClass {
 
       this.currentPosition = newPosition;
       this.currentPositionTime = new Date(location.timestamp).getTime();
+      this.currentSpeed = location.coords.speed !== undefined && location.coords.speed >= 0
+        ? location.coords.speed
+        : null;
     });
 
     // Motion and Activity events disabled to avoid Motion & Fitness permission requirement
@@ -348,6 +352,9 @@ class BackgroundLocationServiceClass {
 
       this.currentPosition = coords;
       this.currentPositionTime = fixTime;
+      this.currentSpeed = location.coords.speed !== undefined && location.coords.speed >= 0
+        ? location.coords.speed
+        : null;
       return coords;
 
     } catch (error) {
@@ -365,6 +372,18 @@ class BackgroundLocationServiceClass {
 
   getLastKnownPosition(): Coordinates | null {
     return this.currentPosition;
+  }
+
+  /**
+   * Speed in km/h from the latest fix (null if it didn't report one), and that fix's age
+   */
+  getLastMotion(): { speedKmh: number | null; fixAgeSeconds: number | null } {
+    return {
+      speedKmh: this.currentSpeed === null ? null : this.currentSpeed * 3.6,
+      fixAgeSeconds: this.currentPositionTime === null
+        ? null
+        : Math.round((Date.now() - this.currentPositionTime) / 1000),
+    };
   }
 
   isTrackingActive(): boolean {

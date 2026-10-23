@@ -125,6 +125,12 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout, onOpenDebug }) => {
     if (lastSendStartedAtRef.current) {
       parts.push(`since_send_s=${Math.round((now - lastSendStartedAtRef.current) / 1000)}`);
     }
+    // Tells a car that stopped (display likely lost power) from a drop while driving
+    const motion = BackgroundLocationService.getLastMotion();
+    parts.push(`speed_kmh=${motion.speedKmh === null ? 'unknown' : Math.round(motion.speedKmh)}`);
+    if (motion.fixAgeSeconds !== null) {
+      parts.push(`fix_age_s=${motion.fixAgeSeconds}`);
+    }
     parts.push(`app=${AppState.currentState}`);
     parts.push(`os=${Platform.OS} ${Platform.Version}`);
     return parts.join(' | ');
