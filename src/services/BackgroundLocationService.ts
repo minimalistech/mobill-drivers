@@ -6,10 +6,16 @@ export interface Coordinates {
   longitude: number;
 }
 
+// A tracked fix at most this old is used as-is for an ad request
+const MAX_TRACKED_FIX_AGE_MS = 3000;
+// One-shot fixes older than this are logged as stale
+const STALE_FIX_AGE_MS = 10000;
+
 class BackgroundLocationServiceClass {
   private isConfigured: boolean = false;
   private isTracking: boolean = false;
   private currentPosition: Coordinates | null = null;
+  private currentPositionTime: number | null = null;
 
   private getConfig() {
     return {
@@ -113,6 +119,7 @@ class BackgroundLocationServiceClass {
       }
 
       this.currentPosition = newPosition;
+      this.currentPositionTime = new Date(location.timestamp).getTime();
     });
 
     // Motion and Activity events disabled to avoid Motion & Fitness permission requirement
@@ -274,6 +281,11 @@ class BackgroundLocationServiceClass {
       await BackgroundGeolocation.start();
       this.isTracking = true;
 
+      // The plugin starts in the stationary state and only begins continuous
+      // updates after leaving a ~200m geofence; until then ad requests could
+      // get old fixes. Stop detection is disabled, so it stays moving until stop().
+      await BackgroundGeolocation.changePace(true);
+
       console.log('✅ Background location tracking started successfully');
       return true;
 
@@ -303,13 +315,22 @@ class BackgroundLocationServiceClass {
   }
 
   async getCurrentPosition(): Promise<Coordinates | null> {
+    // Continuous tracking delivers about one fix per second while moving; use it if recent
+    if (this.currentPosition && this.currentPositionTime &&
+        Date.now() - this.currentPositionTime <= MAX_TRACKED_FIX_AGE_MS) {
+      console.log(`🎯 Using tracked GPS fix (${Date.now() - this.currentPositionTime}ms old)`);
+      return this.currentPosition;
+    }
+
     try {
       console.log('🎯 Getting fresh GPS coordinates for serve_ad...');
 
+      // A single sample: with several, the plugin returns the most accurate one,
+      // which can be the old cached fix iOS reports first
       const location = await BackgroundGeolocation.getCurrentPosition({
-        timeout: 10000, // 10 second timeout
+        samples: 1,
+        timeout: 5, // seconds
         maximumAge: 0, // Don't use cached location
-        enableHighAccuracy: true, // Use GPS
         persist: false, // Don't save to database
       });
 
@@ -317,10 +338,16 @@ class BackgroundLocationServiceClass {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
       };
+      const fixTime = new Date(location.timestamp).getTime();
+      const ageMs = Date.now() - fixTime;
 
-      console.log(`🎯 Fresh GPS: ${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)} (accuracy: ${location.coords.accuracy.toFixed(1)}m)`);
+      console.log(`🎯 Fresh GPS: ${coords.latitude.toFixed(6)}, ${coords.longitude.toFixed(6)} (accuracy: ${location.coords.accuracy.toFixed(1)}m, ${ageMs}ms old)`);
+      if (ageMs > STALE_FIX_AGE_MS) {
+        console.warn(`⚠️ GPS fix is stale (${Math.round(ageMs / 1000)}s old)`);
+      }
 
       this.currentPosition = coords;
+      this.currentPositionTime = fixTime;
       return coords;
 
     } catch (error) {
