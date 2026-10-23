@@ -12,6 +12,7 @@ import {
   Linking,
   PermissionsAndroid,
   Platform,
+  AppState,
 } from 'react-native';
 import AdService, { type AdResponse, type AdContent, type DriverEarnings, type BLEScanResult } from '../services/AdService';
 import BackgroundLocationService from '../services/BackgroundLocationService';
@@ -68,6 +69,9 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout, onOpenDebug }) => {
   const discoverySubscriptionRef = useRef<any>(null);
   const bleSubscriptionRef = useRef<any>(null);
   const isSendingToDisplayRef = useRef<boolean>(false);
+  // Connection timing, attached to disconnect reports so the backend can correlate drops
+  const connectedAtRef = useRef<number | null>(null);
+  const lastSendStartedAtRef = useRef<number | null>(null);
   // Ref mirrors isScanning so onDeviceDiscovered (which captures a stale closure)
   // can distinguish a user-initiated pairing scan from the continuous BLE impression scan.
   const isScanningRef = useRef<boolean>(false);
@@ -109,11 +113,29 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout, onOpenDebug }) => {
     };
   }, []);
 
+  // Keeps the "Bluetooth connection lost" prefix so existing backend queries still match
+  const buildDisconnectNotes = (error?: string): string => {
+    const now = Date.now();
+    const parts = ['Bluetooth connection lost'];
+    parts.push(`reason=${error || 'none'}`);
+    if (connectedAtRef.current) {
+      parts.push(`connected_s=${Math.round((now - connectedAtRef.current) / 1000)}`);
+    }
+    parts.push(`sending=${isSendingToDisplayRef.current}`);
+    if (lastSendStartedAtRef.current) {
+      parts.push(`since_send_s=${Math.round((now - lastSendStartedAtRef.current) / 1000)}`);
+    }
+    parts.push(`app=${AppState.currentState}`);
+    parts.push(`os=${Platform.OS} ${Platform.Version}`);
+    return parts.join(' | ');
+  };
+
   const setupEventListeners = async () => {
     const manager = await loadDisplayManager();
     connectSubscriptionRef.current = manager.onDeviceConnected(
       async (event: DeviceConnectedEvent) => {
         console.log('Device connected:', event);
+        connectedAtRef.current = Date.now();
         setIsDisplayConnected(true);
         setIsConnecting(false);
         isScanningRef.current = false;
@@ -203,6 +225,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout, onOpenDebug }) => {
     disconnectSubscriptionRef.current = manager.onDeviceDisconnected(
       async (event: DeviceDisconnectedEvent) => {
         console.log('Device disconnected:', event);
+        const disconnectNotes = buildDisconnectNotes(event.error);
+        connectedAtRef.current = null;
         setIsDisplayConnected(false);
 
         // Stop background location tracking when display disconnects
@@ -235,7 +259,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout, onOpenDebug }) => {
 
         // This is an unintended disconnection - report and start monitoring
         console.log('📊 Unintended disconnection detected - reporting to backend and starting monitoring');
-        await DisplayStatusAPI.reportDisconnected('Bluetooth connection lost');
+        await DisplayStatusAPI.reportDisconnected(disconnectNotes);
         await DisplayMonitorService.handleDisconnection(event.id, event.name);
 
         const message = event.error
@@ -620,6 +644,7 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout, onOpenDebug }) => {
 
     try {
       isSendingToDisplayRef.current = true;
+      lastSendStartedAtRef.current = Date.now();
 
       // Pause ad fetching while we process and display this ad
       // This prevents new ad requests from being made during display

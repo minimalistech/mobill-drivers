@@ -189,11 +189,11 @@ public class MobillDriversBridgeModule extends ReactContextBaseJavaModule implem
     }
     
     @Override
-    public void onDeviceDisconnected(BluetoothDevice device) {
+    public void onDeviceDisconnected(BluetoothDevice device, int status) {
         WritableMap deviceInfo = Arguments.createMap();
         deviceInfo.putString("id", device.getAddress());
         deviceInfo.putString("name", device.getName() != null ? device.getName() : "Unknown");
-        deviceInfo.putString("error", "");
+        deviceInfo.putString("error", "GATT status " + status);
         
         sendEvent("onDeviceDisconnected", deviceInfo);
     }

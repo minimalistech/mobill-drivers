@@ -92,7 +92,7 @@ public class CoolLEDUBluetoothManager {
     public interface CoolLEDUManagerCallback {
         void onDeviceDiscovered(BluetoothDevice device, int rssi);
         void onDeviceConnected(BluetoothDevice device);
-        void onDeviceDisconnected(BluetoothDevice device);
+        void onDeviceDisconnected(BluetoothDevice device, int status);
         void onDataReceived(byte[] data);
         void onError(String error);
     }
@@ -613,7 +613,7 @@ public class CoolLEDUBluetoothManager {
 
                 // Only notify callback if we were actually connected (not during failed connection attempt)
                 if (wasConnected) {
-                    callback.onDeviceDisconnected(device);
+                    callback.onDeviceDisconnected(device, status);
                 }
 
                 // Attempt auto-reconnect if this was an unexpected disconnect

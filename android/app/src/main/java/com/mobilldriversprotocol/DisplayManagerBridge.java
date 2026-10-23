@@ -121,8 +121,8 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
                 }
 
                 @Override
-                public void onDeviceDisconnected(android.bluetooth.BluetoothDevice device) {
-                    handleDeviceDisconnected(device);
+                public void onDeviceDisconnected(android.bluetooth.BluetoothDevice device, int status) {
+                    handleDeviceDisconnected(device, status);
                 }
 
                 @Override
@@ -1850,11 +1850,12 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
         sendEvent("onDeviceConnected", event);
     }
 
-    private void handleDeviceDisconnected(android.bluetooth.BluetoothDevice device) {
+    private void handleDeviceDisconnected(android.bluetooth.BluetoothDevice device, int status) {
         WritableMap event = Arguments.createMap();
         event.putString("id", device.getAddress());
         event.putString("name", device.getName() != null ? device.getName() : "Unknown");
-        event.putString("error", "");
+        // GATT status distinguishes link loss (8), display-side close (19) and local close (22)
+        event.putString("error", "GATT status " + status);
 
         sendEvent("onDeviceDisconnected", event);
     }

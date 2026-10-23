@@ -1431,9 +1431,14 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
 }
 
 - (void)didDisconnectPeripheral:(GWPeripheral *)peripheral error:(NSError *)error {
+    // CBError code distinguishes link loss (6 timeout) from a display-side close (7)
+    NSString *errorText = error
+        ? [NSString stringWithFormat:@"%@ %ld: %@", error.domain, (long)error.code, error.localizedDescription]
+        : @"";
     [self sendEventWithName:@"onDeviceDisconnected" body:@{
-        @"id": peripheral.UUIDString,
-        @"name": peripheral.name
+        @"id": peripheral.UUIDString ?: @"",
+        @"name": peripheral.name ?: @"",
+        @"error": errorText
     }];
 }
 
