@@ -1870,6 +1870,20 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
         // GATT status distinguishes link loss (8), display-side close (19) and local close (22)
         event.putString("error", "GATT status " + status);
 
+        // Fail an in-flight transfer now instead of waiting for the packet timeout;
+        // until isTransmitting clears, every displayContent after reconnect is refused
+        mainHandler.post(() -> {
+            cancelPacketTimeout();
+            if (isTransmitting) {
+                Log.w(TAG, "Transfer interrupted by disconnect at packet " + currentPacketIndex);
+            }
+            isTransmitting = false;
+            if (pendingPromise != null) {
+                pendingPromise.reject("DISCONNECTED", "Display disconnected during send");
+                pendingPromise = null;
+            }
+        });
+
         sendEvent("onDeviceDisconnected", event);
     }
 
