@@ -581,31 +581,6 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
 */
 #pragma mark - Core Image Display Logic
 
-- (UIImage *)downloadWhiteImageFromAPI {
-    // Download the exact same white image that the working native app uses
-    NSData *imageData = [self fetchContentData:@"https://placehold.co/96x16/FF0000/FFFFFF/png?text=MOBILL"];
-    
-    if (imageData) {
-        UIImage *image = [UIImage imageWithData:imageData];
-        return image;
-    } else {
-        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-        CGContextRef context = CGBitmapContextCreate(NULL, 96, 16, 8, 96 * 4, colorSpace, kCGImageAlphaPremultipliedLast);
-        CGColorSpaceRelease(colorSpace);
-        UIColor *color = [UIColor colorWithRed:1.0 green:0.0 blue:0.0 alpha:1.0]; // Yellow
-        CGContextSetFillColorWithColor(context, color.CGColor);
-        CGContextFillRect(context, CGRectMake(0, 0, 96, 16));
-        CGImageRef imageRef = CGBitmapContextCreateImage(context);
-        UIImage *image = [UIImage imageWithCGImage:imageRef];
-        CGImageRelease(imageRef);
-
-        return image;
-    }
-}
-
-
-
-
 #pragma mark - Generic Content Display Methods
 
 - (void)displayImageContent:(NSString *)contentUrl
@@ -621,29 +596,31 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     // Download the actual ad image from the provided URL
     UIImage *downloadedImage = [self downloadImageFromURL:contentUrl];
 
-    UIImage *image;
+    // Skip the ad rather than show a placeholder; the display keeps its current content
     if (!downloadedImage) {
-        NSLog(@"Failed to download image from URL: %@, using fallback", contentUrl);
-        image = [self downloadWhiteImageFromAPI];
+        NSLog(@"Failed to download image from URL: %@, skipping ad", contentUrl);
+        reject(@"DOWNLOAD_FAILED", @"Could not download ad image", nil);
+        return;
+    }
+
+    UIImage *image;
+    NSLog(@"Successfully downloaded ad image from: %@", contentUrl);
+
+    // Check if scaling is needed
+    NSNumber *width = displaySize[@"width"];
+    NSNumber *height = displaySize[@"height"];
+    CGSize targetSize = CGSizeMake(width.intValue, height.intValue);
+    CGSize imageSize = downloadedImage.size;
+
+    if (imageSize.width != targetSize.width || imageSize.height != targetSize.height) {
+        NSLog(@"Image size (%gx%g) differs from target (%gx%g), scaling needed",
+              imageSize.width, imageSize.height, targetSize.width, targetSize.height);
+        image = [self scaleAndCropImage:downloadedImage toSize:targetSize];
+        NSLog(@"Scaled ad image to size: %@x%@", width, height);
     } else {
-        NSLog(@"Successfully downloaded ad image from: %@", contentUrl);
-
-        // Check if scaling is needed
-        NSNumber *width = displaySize[@"width"];
-        NSNumber *height = displaySize[@"height"];
-        CGSize targetSize = CGSizeMake(width.intValue, height.intValue);
-        CGSize imageSize = downloadedImage.size;
-
-        if (imageSize.width != targetSize.width || imageSize.height != targetSize.height) {
-            NSLog(@"Image size (%gx%g) differs from target (%gx%g), scaling needed",
-                  imageSize.width, imageSize.height, targetSize.width, targetSize.height);
-            image = [self scaleAndCropImage:downloadedImage toSize:targetSize];
-            NSLog(@"Scaled ad image to size: %@x%@", width, height);
-        } else {
-            NSLog(@"Image size (%gx%g) matches target size, no scaling needed",
-                  imageSize.width, imageSize.height);
-            image = downloadedImage;
-        }
+        NSLog(@"Image size (%gx%g) matches target size, no scaling needed",
+              imageSize.width, imageSize.height);
+        image = downloadedImage;
     }
 
     // Verify device connection BEFORE storing promise
@@ -692,11 +669,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
                                                       (int)deviceType, deviceHeight, deviceWidth];
     [ThemManager sharedInstance].peripheralName = @"CoolLEDU";
 
-    // Extract display size parameters
-    NSNumber *width = displaySize[@"width"];
-    NSNumber *height = displaySize[@"height"];
-
-    // Create color item model using helper function
+    // Create color item model using helper function (width/height from displaySize above)
     ColorItemModel32 *colorItemModel = [self createColorItemModelFromImage:image
                                                                       width:width.intValue
                                                                      height:height.intValue
@@ -917,16 +890,19 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
         animationFrames = [self downloadAndExtractGIFFrames:contentUrl targetSize:targetSize];
 
         if (animationFrames.count == 0) {
-            // Fallback to test frames if GIF processing fails
-            NSLog(@"GIF processing failed, falling back to test frames");
-            UIImage *frame1 = [self downloadImageFromURL:@"https://placehold.co/96x16/FF0000/FFFFFF/png?text=ERROR"];
-            animationFrames = @[frame1];
+            NSLog(@"GIF processing failed, skipping ad");
+            [self rejectPendingSend:@"DOWNLOAD_FAILED" message:@"Could not load ad animation"];
+            return;
         }
     } else if ([contentUrl hasPrefix:@"test://"]) {
         // Use test frames for test:// URLs
         UIImage *frame1 = [self downloadImageFromURL:@"https://placehold.co/96x16/FF0000/FFFFFF/png?text=MO"];
         UIImage *frame2 = [self downloadImageFromURL:@"https://placehold.co/96x16/FF0000/FFFFFF/png?text=MOBI"];
         UIImage *frame3 = [self downloadImageFromURL:@"https://placehold.co/96x16/FF0000/FFFFFF/png?text=MOBILL"];
+        if (!frame1 || !frame2 || !frame3) {
+            [self rejectPendingSend:@"DOWNLOAD_FAILED" message:@"Could not load test frames"];
+            return;
+        }
         animationFrames = @[frame1, frame2, frame3];
     } else {
         // Try to process as single image
@@ -935,9 +911,9 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
             UIImage *scaledImage = [self scaleAndCropImage:singleImage toSize:targetSize];
             animationFrames = @[scaledImage];
         } else {
-            // Fallback to error frame
-            UIImage *errorFrame = [self downloadImageFromURL:@"https://placehold.co/96x16/FF0000/FFFFFF/png?text=ERROR"];
-            animationFrames = @[errorFrame];
+            NSLog(@"Failed to download animation image, skipping ad");
+            [self rejectPendingSend:@"DOWNLOAD_FAILED" message:@"Could not load ad animation"];
+            return;
         }
     }
     
@@ -1564,25 +1540,20 @@ static const NSTimeInterval kContentDownloadTimeout = 8.0;
     return result;
 }
 
+// Returns nil if the download fails or the data isn't an image
 - (UIImage *)downloadImageFromURL:(NSString *)urlString {
     NSData *imageData = [self fetchContentData:urlString];
+    return imageData ? [UIImage imageWithData:imageData] : nil;
+}
 
-    if (imageData) {
-        UIImage *image = [UIImage imageWithData:imageData];
-        return image;
-    } else {
-        // Create fallback red background image
-        CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-        CGContextRef context = CGBitmapContextCreate(NULL, 96, 16, 8, 96 * 4, colorSpace, kCGImageAlphaPremultipliedLast);
-        CGColorSpaceRelease(colorSpace);
-        UIColor *color = [UIColor redColor];
-        CGContextSetFillColorWithColor(context, color.CGColor);
-        CGContextFillRect(context, CGRectMake(0, 0, 96, 16));
-        CGImageRef imageRef = CGBitmapContextCreateImage(context);
-        UIImage *fallbackImage = [UIImage imageWithCGImage:imageRef];
-        CGImageRelease(imageRef);
-        CGContextRelease(context);
-        return fallbackImage;
+// Settle a displayContent call whose promise is already stored, e.g. when its
+// content can't be loaded, so JS resumes ad requests
+- (void)rejectPendingSend:(NSString *)code message:(NSString *)message {
+    RCTPromiseRejectBlock reject = self.pendingReject;
+    self.pendingResolve = nil;
+    self.pendingReject = nil;
+    if (reject) {
+        reject(code, message, nil);
     }
 }
 

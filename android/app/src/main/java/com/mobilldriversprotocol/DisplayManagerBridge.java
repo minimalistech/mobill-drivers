@@ -254,6 +254,7 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
                 // 1. Download image from URL
                 Bitmap image = downloadImageFromURL(contentUrl);
                 if (image == null) {
+                    // Skip the ad; the display keeps its current content
                     Log.e(TAG, "❌ Failed to download image from URL: " + contentUrl);
                     isTransmitting = false; // Reset flag on error
                     promise.reject("IMAGE_DOWNLOAD_FAILED", "Could not download image from URL");
@@ -467,12 +468,19 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
             } else {
                 // Single image as one frame
                 Bitmap singleImage = downloadImageFromURL(contentUrl);
-                if (singleImage != null) {
-                    frames = Arrays.asList(scaleAndCropImage(singleImage, width, height));
-                } else {
-                    promise.reject("ANIMATION_LOAD_FAILED", "Could not load animation content");
-                    return;
-                }
+                frames = singleImage != null
+                    ? Arrays.asList(scaleAndCropImage(singleImage, width, height))
+                    : new ArrayList<>();
+            }
+
+            // Skip the ad rather than send nothing; the display keeps its current content.
+            // isTransmitting must be cleared or every later ad is rejected as BUSY.
+            if (frames.isEmpty()) {
+                Log.e(TAG, "❌ Could not load animation content, skipping ad: " + contentUrl);
+                isTransmitting = false;
+                pendingPromise = null;
+                promise.reject("DOWNLOAD_FAILED", "Could not load animation content");
+                return;
             }
 
             // Store frames for type 1 notification handler
@@ -780,8 +788,9 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
             byte[] gifData = fetchContentData(gifUrl);
 
             if (gifData == null || gifData.length == 0) {
+                // No single-frame fallback: it would download the same URL again
                 Log.e(TAG, "❌ Failed to download GIF data");
-                return fallbackToSingleFrame(gifUrl, width, height);
+                return frames;
             }
 
             Log.d(TAG, "🎬 GIF data size: " + gifData.length + " bytes");
