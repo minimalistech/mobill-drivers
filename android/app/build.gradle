@@ -1,6 +1,22 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+apply plugin: "com.github.triplet.play"
+
+/**
+ * Google Play uploads (Gradle Play Publisher). The service-account key is never
+ * committed: point PLAY_SERVICE_ACCOUNT_JSON (or -PplayServiceAccountJson) at it.
+ * Upload an already-built bundle to internal testing with:
+ *   ./gradlew publishReleaseBundle --artifact-dir app/build/outputs/bundle/release
+ */
+play {
+    track.set("internal")
+    defaultToAppBundles.set(true)
+    def playKey = System.getenv("PLAY_SERVICE_ACCOUNT_JSON") ?: findProperty("playServiceAccountJson")
+    if (playKey) {
+        serviceAccountCredentials.set(file(playKey))
+    }
+}
 
 /**
  * This is the configuration block to customize your React Native Android app.
