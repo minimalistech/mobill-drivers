@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import BackgroundTimer from 'react-native-background-timer';
 import DisplayStatusAPI from './DisplayStatusAPI';
 import NotificationServiceModule from './NotificationService';
@@ -20,6 +21,9 @@ type MonitoringCallback = (durationMinutes: number, showWarning: boolean) => voi
 // Delays between reconnection scans; the last value repeats until reconnected
 const RECONNECT_DELAYS_MS = [5000, 15000, 30000, 60000];
 
+// Outage start time, persisted so an app restart mid-outage still reports the recovery
+const OUTAGE_STORAGE_KEY = 'displayOutageStartedAt';
+
 class DisplayMonitorServiceClass {
   private isMonitoring: boolean = false;
   private isIntentionalDisconnection: boolean = false;
@@ -30,7 +34,7 @@ class DisplayMonitorServiceClass {
   private monitoringInterval: number | null = null;
   private reconnectionTimers: number[] = [];
   private onStatusUpdate: MonitoringCallback | null = null;
-  private wasLastReconnectionAuto: boolean = false;
+  private manualReconnectRequested: boolean = false;
 
   /**
    * Mark that user is intentionally disconnecting (Turn Off button pressed)
@@ -67,7 +71,10 @@ class DisplayMonitorServiceClass {
     this.lastDeviceName = deviceName;
     this.disconnectionStartTime = Date.now();
     this.reconnectionAttempts = 0;
-    this.wasLastReconnectionAuto = false;
+    this.manualReconnectRequested = false;
+    AsyncStorage.setItem(OUTAGE_STORAGE_KEY, String(this.disconnectionStartTime)).catch(error =>
+      console.error('📊 DisplayMonitor: Failed to persist outage start:', error)
+    );
 
     // Start monitoring
     this.startMonitoring();
@@ -120,7 +127,10 @@ class DisplayMonitorServiceClass {
     this.lastDeviceId = null;
     this.lastDeviceName = null;
     this.reconnectionAttempts = 0;
-    this.wasLastReconnectionAuto = false;
+    this.manualReconnectRequested = false;
+    AsyncStorage.removeItem(OUTAGE_STORAGE_KEY).catch(error =>
+      console.error('📊 DisplayMonitor: Failed to clear persisted outage:', error)
+    );
   }
 
   /**
@@ -201,7 +211,6 @@ class DisplayMonitorServiceClass {
       // works when the device is already advertising, which is a narrow window after
       // power-on. A scan actively discovers the device and the native scanCallback
       // auto-connects to any previously-saved device it finds.
-      this.wasLastReconnectionAuto = true;
       const success = await manager.startScan();
 
       if (success) {
@@ -233,10 +242,47 @@ class DisplayMonitorServiceClass {
   }
 
   /**
+   * Record that the user pressed Turn On during an outage, so the reconnection
+   * is reported as manual. Any other reconnection (scan retries, or the native
+   * pending connect firing when the display reappears) counts as automatic.
+   */
+  markManualReconnectRequested(): void {
+    if (this.isMonitoring) {
+      this.manualReconnectRequested = true;
+    }
+  }
+
+  /**
    * Check if the last reconnection was automatic
    */
   wasLastReconnectionAutomatic(): boolean {
-    return this.wasLastReconnectionAuto;
+    return !this.manualReconnectRequested;
+  }
+
+  /**
+   * Start time of the outage being monitored, or null when not monitoring
+   */
+  getOutageStartTime(): number | null {
+    return this.disconnectionStartTime;
+  }
+
+  /**
+   * Start time of an outage left unfinished by a previous app session, if any.
+   * Clears it so the recovery is reported once.
+   */
+  async takeOutageFromPreviousSession(): Promise<number | null> {
+    try {
+      const value = await AsyncStorage.getItem(OUTAGE_STORAGE_KEY);
+      if (!value) {
+        return null;
+      }
+      await AsyncStorage.removeItem(OUTAGE_STORAGE_KEY);
+      const startedAt = Number(value);
+      return Number.isFinite(startedAt) ? startedAt : null;
+    } catch (error) {
+      console.error('📊 DisplayMonitor: Failed to read persisted outage:', error);
+      return null;
+    }
   }
 
   /**

@@ -93,9 +93,19 @@ class DisplayStatusAPIClass {
   /**
    * Report display reconnected (after unintended disconnect)
    */
-  async reportReconnected(automatic: boolean = false): Promise<DisplayStatusResponse | null> {
-    const notes = automatic ? 'Automatic reconnection successful' : 'Manual reconnection';
-    return this.reportStatus('reconnected', notes);
+  async reportReconnected(
+    automatic: boolean = false,
+    outageSeconds?: number,
+    afterRestart: boolean = false
+  ): Promise<DisplayStatusResponse | null> {
+    const parts = [automatic ? 'Automatic reconnection successful' : 'Manual reconnection'];
+    if (outageSeconds !== undefined) {
+      parts.push(`outage_s=${outageSeconds}`);
+    }
+    if (afterRestart) {
+      parts.push('after_restart=true');
+    }
+    return this.reportStatus('reconnected', parts.join(' | '));
   }
 }
 

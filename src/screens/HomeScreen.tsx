@@ -141,16 +141,22 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout, onOpenDebug }) => {
         isScanningRef.current = false;
         setIsScanning(false);
 
-        // Check if this is a reconnection after unintended disconnect
+        // Check if this is a reconnection after unintended disconnect. An outage
+        // from a previous app session counts too: the app was restarted before the
+        // display came back, and only Turn On connects after a restart, so it's manual.
         const wasMonitoring = DisplayMonitorService.isCurrentlyMonitoring();
-        if (wasMonitoring) {
-          const wasAutomatic = DisplayMonitorService.wasLastReconnectionAutomatic();
+        const outageStartedAt = wasMonitoring
+          ? DisplayMonitorService.getOutageStartTime()
+          : await DisplayMonitorService.takeOutageFromPreviousSession();
+        if (outageStartedAt) {
+          const wasAutomatic = wasMonitoring && DisplayMonitorService.wasLastReconnectionAutomatic();
           if (wasAutomatic) {
             console.log('✅ Automatic reconnection successful! Device connected.');
           } else {
             console.log('📊 Manual reconnection successful.');
           }
-          await DisplayStatusAPI.reportReconnected(wasAutomatic);
+          const outageSeconds = Math.round((Date.now() - outageStartedAt) / 1000);
+          await DisplayStatusAPI.reportReconnected(wasAutomatic, outageSeconds, !wasMonitoring);
           DisplayMonitorService.stopMonitoring();
           setShowDisconnectWarning(false);
           setDisconnectionDuration(0);
@@ -436,6 +442,8 @@ const HomeScreen: React.FC<HomeScreenProps> = ({ onLogout, onOpenDebug }) => {
       if (!connectSubscriptionRef.current) {
         await setupEventListeners();
       }
+
+      DisplayMonitorService.markManualReconnectRequested();
 
       // If already connected, just turn on the display
       if (isDisplayConnected) {
