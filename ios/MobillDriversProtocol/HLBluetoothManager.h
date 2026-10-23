@@ -51,6 +51,10 @@
 
 - (void)startConnectDevice:(GWPeripheral *)peripheralModel;
 - (void)cancelDevice:(GWPeripheral *)peripheralModel;
+/// Cancel all pending reconnects to devices that dropped unexpectedly
+- (void)stopAutoReconnect;
+/// Keep a connect request pending until the device advertises again
+- (void)scheduleReconnectForModel:(GWPeripheral *)model;
 
 - (void)writCommad:(NSString *)commad;
 

@@ -614,8 +614,11 @@
     if (self.peripheral.state == CBPeripheralStateConnected) {
         return;
     }
-    [ProgressHUD showError:showText(@"超时")];
-    [[HLBluetoothManager standardManager] cancelDevice:self];
+    // Leave the connect pending instead of cancelling it: iOS completes it as soon
+    // as the display advertises again, and cancelDevice: would also erase the saved
+    // UUID that scan-based auto-reconnect depends on.
+    NSLog(@"🔄 GWPeripheral: connect to %@ still pending after 10s, keeping it open", self.name);
+    [[HLBluetoothManager standardManager] scheduleReconnectForModel:self];
 }
 
 #pragma mark - alert

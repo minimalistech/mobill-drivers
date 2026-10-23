@@ -344,7 +344,9 @@ RCT_EXPORT_METHOD(disconnectDevice:(NSString *)deviceId
         resolve(@(YES));
         return;
     }
-    
+
+    // Turn Off during an outage must also stop the pending reconnect
+    [self.bluetoothManager stopAutoReconnect];
     reject(@"DEVICE_NOT_CONNECTED", @"Device not connected", nil);
 }
 

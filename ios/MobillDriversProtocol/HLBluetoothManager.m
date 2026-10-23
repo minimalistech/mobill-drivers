@@ -46,6 +46,13 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
 }
 
 @property (nonatomic,strong) NSMutableDictionary *charMap;
+
+// Devices that dropped unexpectedly and have a pending connectPeripheral.
+// CoreBluetooth keeps a pending connect open with no timeout and completes it
+// as soon as the display advertises again.
+@property (nonatomic, strong) NSMutableArray<GWPeripheral *> *reconnectingModels;
+// UUIDs the user disconnected on purpose; these are never auto-reconnected
+@property (nonatomic, strong) NSMutableSet<NSString *> *userCancelledUUIDs;
 @property (nonatomic,strong) NSMutableDictionary *characterDictionary;
 
 @property (nonatomic, copy) SendCompletion sendCompletion;
@@ -86,6 +93,8 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
         self.scanedModelsArray = [NSMutableArray array];
         self.scanedPeripheralSet = [NSMutableSet set];
         self.connectedModelsArray = [NSMutableArray array];
+        self.reconnectingModels = [NSMutableArray array];
+        self.userCancelledUUIDs = [NSMutableSet set];
         
         self.characterDictionary = [NSMutableDictionary dictionary];
         self.charMap = [NSMutableDictionary dictionary];
@@ -116,6 +125,12 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
     for (GWPeripheral *gwPeriph in self.connectedModelsArray) {
         [connectedArray addObject:gwPeriph];
     }
+    // Keep models with a pending reconnect so their connect callbacks still resolve
+    for (GWPeripheral *gwPeriph in self.reconnectingModels) {
+        if (![connectedArray containsObject:gwPeriph]) {
+            [connectedArray addObject:gwPeriph];
+        }
+    }
     
     [self.scanedPeripheralSet removeAllObjects];
     [self.scanedModelsArray removeAllObjects];
@@ -140,6 +155,10 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
 
 - (void)startConnectDevice:(GWPeripheral *)peripheralModel
 {
+    if (peripheralModel.UUIDString) {
+        [self.userCancelledUUIDs removeObject:peripheralModel.UUIDString];
+    }
+
     if (peripheralModel.peripheral.state == CBPeripheralStateConnecting || peripheralModel.peripheral.state == CBPeripheralStateConnected) {
         return;
     }
@@ -154,6 +173,11 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
 
 - (void)cancelDevice:(GWPeripheral *)peripheralModel
 {
+    if (peripheralModel.UUIDString) {
+        [self.userCancelledUUIDs addObject:peripheralModel.UUIDString];
+    }
+    [self.reconnectingModels removeObject:peripheralModel];
+
     if (peripheralModel.peripheral.state == CBPeripheralStateDisconnecting || peripheralModel.peripheral.state == CBPeripheralStateDisconnected) {
         return;
     }
@@ -169,6 +193,33 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
     
     [[NSUserDefaults standardUserDefaults] setObject:arrayM forKey:kLastConnectedPeripheral];
     [[NSUserDefaults standardUserDefaults] synchronize];
+}
+
+- (void)stopAutoReconnect
+{
+    for (GWPeripheral *model in [self.reconnectingModels copy]) {
+        [self cancelDevice:model];
+    }
+    [self.reconnectingModels removeAllObjects];
+}
+
+- (void)scheduleReconnectForModel:(GWPeripheral *)model
+{
+    if (!model.peripheral || [self.userCancelledUUIDs containsObject:model.UUIDString]) {
+        return;
+    }
+    if (![self.reconnectingModels containsObject:model]) {
+        [self.reconnectingModels addObject:model];
+    }
+    if (![self.scanedModelsArray containsObject:model]) {
+        [self.scanedModelsArray addObject:model];
+    }
+    if (self.manager.state != CBManagerStatePoweredOn) {
+        // Resumed from centralManagerDidUpdateState once Bluetooth is back
+        return;
+    }
+    NSLog(@"🔄 HLBluetoothManager: Pending reconnect to %@", model.name);
+    [self.manager connectPeripheral:model.peripheral options:nil];
 }
 
 #pragma mark 写数据
@@ -438,8 +489,35 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
 {
     if (central.state == 5) {
         [self.manager scanForPeripheralsWithServices:nil options:@{CBCentralManagerScanOptionAllowDuplicatesKey:@YES}];
+
+        // Peripheral objects are invalid after Bluetooth was off or reset; re-fetch
+        // them by identifier and resume the pending reconnects
+        for (GWPeripheral *model in [self.reconnectingModels copy]) {
+            NSUUID *identifier = [[NSUUID alloc] initWithUUIDString:model.UUIDString];
+            CBPeripheral *fresh = identifier ? [central retrievePeripheralsWithIdentifiers:@[identifier]].firstObject : nil;
+            if (fresh) {
+                model.peripheral = fresh;
+            }
+            [self scheduleReconnectForModel:model];
+        }
+        return;
     }
-    
+
+    // Bluetooth went off, unauthorized or is resetting. CoreBluetooth does not call
+    // didDisconnectPeripheral in this case, so report the drop ourselves and queue
+    // the devices for reconnection when Bluetooth returns.
+    NSError *stateError = [NSError errorWithDomain:@"BluetoothState"
+                                              code:central.state
+                                          userInfo:@{NSLocalizedDescriptionKey: @"Bluetooth not powered on"}];
+    for (GWPeripheral *model in [self.connectedModelsArray copy]) {
+        [self.connectedModelsArray removeObject:model];
+        if (![self.userCancelledUUIDs containsObject:model.UUIDString] && ![self.reconnectingModels containsObject:model]) {
+            [self.reconnectingModels addObject:model];
+        }
+        if ([self.delegate respondsToSelector:@selector(didDisconnectPeripheral:error:)]) {
+            [self.delegate didDisconnectPeripheral:model error:stateError];
+        }
+    }
 }
 
 - (void)centralManager:(CBCentralManager *)central didDiscoverPeripheral:(CBPeripheral *)peripheral advertisementData:(NSDictionary<NSString *,id> *)advertisementData RSSI:(NSNumber *)RSSI
@@ -608,15 +686,36 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
             if ([self.delegate respondsToSelector:@selector(didFailToConnectPeripheral:)]) {
                 [self.delegate didFailToConnectPeripheral:peripheralModel];
             }
+            if ([self.reconnectingModels containsObject:peripheralModel]) {
+                GWPeripheral *model = peripheralModel;
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    if ([self.reconnectingModels containsObject:model]) {
+                        [self scheduleReconnectForModel:model];
+                    }
+                });
+            }
         }
     }
 }
 
 - (void)centralManager:(CBCentralManager *)central didDisconnectPeripheral:(CBPeripheral *)peripheral error:(NSError *)error
 {
-    for (GWPeripheral *peripheralModel in self.scanedModelsArray) {
+    for (GWPeripheral *peripheralModel in [self.scanedModelsArray copy]) {
         if (peripheralModel.peripheral == peripheral) {
+            BOOL wasConnected = [self.connectedModelsArray containsObject:peripheralModel];
             [self.connectedModelsArray removeObject:peripheralModel];
+
+            if ([self.userCancelledUUIDs containsObject:peripheralModel.UUIDString]) {
+                [self.userCancelledUUIDs removeObject:peripheralModel.UUIDString];
+                [self.reconnectingModels removeObject:peripheralModel];
+            } else {
+                [self scheduleReconnectForModel:peripheralModel];
+            }
+            // A cancelled pending connect also lands here; only a real link loss is reported
+            if (!wasConnected) {
+                continue;
+            }
+
             if ([self.delegate respondsToSelector:@selector(didDisconnectPeripheral:error:)]) {
                 [self.delegate didDisconnectPeripheral:peripheralModel error:error];
             }
@@ -732,6 +831,7 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
                 if(!isContainModel){
                     [self.connectedModelsArray addObject:peripheralModel];
                 }
+                [self.reconnectingModels removeObject:peripheralModel];
                 
                 NSArray *connectedDevices = [[NSUserDefaults standardUserDefaults] objectForKey:kLastConnectedPeripheral];
                 if ([connectedDevices isKindOfClass:[NSString class]]) {
