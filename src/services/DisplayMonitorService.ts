@@ -17,6 +17,9 @@ const loadDisplayManager = async () => {
 
 type MonitoringCallback = (durationMinutes: number, showWarning: boolean) => void;
 
+// Delays between reconnection scans; the last value repeats until reconnected
+const RECONNECT_DELAYS_MS = [5000, 15000, 30000, 60000];
+
 class DisplayMonitorServiceClass {
   private isMonitoring: boolean = false;
   private isIntentionalDisconnection: boolean = false;
@@ -47,6 +50,13 @@ class DisplayMonitorServiceClass {
     if (this.isIntentionalDisconnection) {
       console.log('📊 DisplayMonitor: Disconnection was intentional, ignoring');
       this.isIntentionalDisconnection = false;
+      return;
+    }
+
+    // A second disconnect event while already monitoring must not reset the
+    // outage start time or schedule a second set of attempts
+    if (this.isMonitoring) {
+      console.log('📊 DisplayMonitor: Already monitoring this outage, ignoring duplicate disconnect');
       return;
     }
 
@@ -153,30 +163,28 @@ class DisplayMonitorServiceClass {
 
   /**
    * Schedule automatic reconnection attempts
-   * Attempts at: 1 min, 3 min, 5 min after disconnect
+   * Attempts at 5s, 15s, 30s, then every 60s until reconnected or monitoring stops
    */
-  private scheduleReconnectionAttempts(): void {
-    const attemptDelays = [
-      5000,    // 5 seconds
-      15000,   // 15 seconds
-      30000,   // 30 seconds
-    ];
+  private scheduleReconnectionAttempts(attemptNumber: number = 1): void {
+    const delay = RECONNECT_DELAYS_MS[Math.min(attemptNumber - 1, RECONNECT_DELAYS_MS.length - 1)];
 
-    attemptDelays.forEach((delay, index) => {
-      const timerId = BackgroundTimer.setTimeout(() => {
-        if (this.isMonitoring) {
-          this.attemptReconnection(index + 1);
-        }
-      }, delay);
-      this.reconnectionTimers.push(timerId);
-    });
+    const timerId = BackgroundTimer.setTimeout(async () => {
+      if (!this.isMonitoring) {
+        return;
+      }
+      await this.attemptReconnection(attemptNumber);
+      if (this.isMonitoring) {
+        this.scheduleReconnectionAttempts(attemptNumber + 1);
+      }
+    }, delay);
+    this.reconnectionTimers.push(timerId);
 
-    console.log('📊 DisplayMonitor: Scheduled 3 reconnection attempts (1m, 3m, 5m)');
+    console.log(`📊 DisplayMonitor: Reconnection attempt #${attemptNumber} scheduled in ${delay / 1000}s`);
   }
 
   /**
    * Attempt to reconnect to the last known device
-   * @param attemptNumber Attempt number (1-3)
+   * @param attemptNumber Attempt number, starting at 1
    */
   private async attemptReconnection(attemptNumber: number): Promise<void> {
     if (!this.lastDeviceId || !this.isMonitoring) {
@@ -201,24 +209,6 @@ class DisplayMonitorServiceClass {
         // Note: stopMonitoring() will be called from onDeviceConnected in HomeScreen if connection succeeds
       } else {
         console.log(`❌ DisplayMonitor: Scan failed to start for reconnection #${attemptNumber}`);
-
-        // If all 3 attempts failed, send immediate notification
-        if (attemptNumber === 3) {
-          console.log('📊 DisplayMonitor: All reconnection attempts failed - sending immediate notification');
-          try {
-            const notificationService = await loadNotificationService();
-            const durationMinutes = this.getDisconnectionDurationMinutes();
-            await notificationService.showProlongedDisconnectionAlert(durationMinutes);
-          } catch (error) {
-            console.error('Failed to show disconnection alert:', error);
-          }
-
-          // Report to backend
-          await DisplayStatusAPI.reportStatus(
-            'disconnected',
-            `3 reconnection attempts failed after ${this.getDisconnectionDurationMinutes()} minutes`
-          );
-        }
       }
     } catch (error) {
       console.error(`📊 DisplayMonitor: Error during reconnection attempt #${attemptNumber}:`, error);
