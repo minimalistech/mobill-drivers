@@ -55,6 +55,8 @@
 - (void)stopAutoReconnect;
 /// Keep a connect request pending until the device advertises again
 - (void)scheduleReconnectForModel:(GWPeripheral *)model;
+/// Drop an in-flight package transfer and any queued chunks for this device
+- (void)abortTransferOnModel:(GWPeripheral *)model;
 
 - (void)writCommad:(NSString *)commad;
 

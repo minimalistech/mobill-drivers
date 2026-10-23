@@ -43,6 +43,8 @@ static NSString * const MOBILL_DRIVERS_VERSION = @"2.96";
 @property (nonatomic, strong) NSURLSession *contentSession;
 // Downloaded ad content by URL, kept for the app session (memory only)
 @property (nonatomic, strong) NSCache<NSString *, NSData *> *contentCache;
+// Identifies the current send so a stale watchdog doesn't end a newer one
+@property (atomic, assign) NSUInteger transferGeneration;
 @property (nonatomic, strong) NSTimer *scanTimeoutTimer;
 @property (nonatomic, assign) BOOL isScanActive;
 // Continuous BLE scanning for impression tracking
@@ -643,6 +645,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     // Store promise for later resolution AFTER validation (critical fix for promise leak)
     self.pendingResolve = resolve;
     self.pendingReject = reject;
+    [self startTransferWatchdog];
 
     // Store image for later use in notification handler (critical for working method)
     self.lastImage = image;
@@ -811,6 +814,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     // Store promise for later resolution AFTER validation (critical fix for promise leak)
     self.pendingResolve = resolve;
     self.pendingReject = reject;
+    [self startTransferWatchdog];
 
     // Use manufacturer's working protocol for text content
     [JTTool startItemContentCommand:colorItemModel
@@ -858,6 +862,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     // Store promise for later resolution AFTER validation (critical fix for promise leak)
     self.pendingResolve = resolve;
     self.pendingReject = reject;
+    [self startTransferWatchdog];
 
     // Configure device for the specified display size
     [self configureDeviceForDisplaySize:displaySize];
@@ -1560,6 +1565,28 @@ static const NSTimeInterval kContentDownloadTimeout = 8.0;
 - (UIImage *)downloadImageFromURL:(NSString *)urlString {
     NSData *imageData = [self fetchContentData:urlString];
     return imageData ? [UIImage imageWithData:imageData] : nil;
+}
+
+// A send otherwise ends only when the display confirms it or the link drops. If the
+// display stays connected but stops answering (or the package retries give up, which
+// only shows an alert), JS would keep ad requests paused indefinitely.
+static const NSTimeInterval kTransferTimeout = 90.0;
+
+- (void)startTransferWatchdog {
+    NSUInteger generation = ++self.transferGeneration;
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(kTransferTimeout * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        __strong typeof(weakSelf) strongSelf = weakSelf;
+        if (!strongSelf || strongSelf.transferGeneration != generation || !strongSelf.pendingReject) {
+            return;
+        }
+        NSLog(@"PERF|transfer_timeout|no confirmation from display after %.0fs", kTransferTimeout);
+        strongSelf.pendingAnimationModel = nil;
+        if (strongSelf.connectedDevice) {
+            [[HLBluetoothManager standardManager] abortTransferOnModel:strongSelf.connectedDevice];
+        }
+        [strongSelf rejectPendingSend:@"TIMEOUT" message:@"Display did not confirm the transfer"];
+    });
 }
 
 // Settle a displayContent call whose promise is already stored, e.g. when its
