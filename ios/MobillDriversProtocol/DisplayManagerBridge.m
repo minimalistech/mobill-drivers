@@ -39,6 +39,8 @@ static NSString * const MOBILL_DRIVERS_VERSION = @"2.96";
 // uploaded only if the device answers 0200 (needs it); on 0201 the device
 // already stores this CRC32 and is displaying it, so the upload is skipped.
 @property (nonatomic, strong) ColorItemModel32 *pendingAnimationModel;
+// Session for ad content downloads, with a total time limit per download
+@property (nonatomic, strong) NSURLSession *contentSession;
 @property (nonatomic, strong) NSTimer *scanTimeoutTimer;
 @property (nonatomic, assign) BOOL isScanActive;
 // Continuous BLE scanning for impression tracking
@@ -581,8 +583,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
 
 - (UIImage *)downloadWhiteImageFromAPI {
     // Download the exact same white image that the working native app uses
-    NSURL *url = [NSURL URLWithString:@"https://placehold.co/96x16/FF0000/FFFFFF/png?text=MOBILL"];
-    NSData *imageData = [NSData dataWithContentsOfURL:url];
+    NSData *imageData = [self fetchContentData:@"https://placehold.co/96x16/FF0000/FFFFFF/png?text=MOBILL"];
     
     if (imageData) {
         UIImage *image = [UIImage imageWithData:imageData];
@@ -1116,8 +1117,7 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
  * @returns Array of UIImage frames ready for display
  */
 - (NSArray<UIImage *> *)downloadAndExtractGIFFrames:(NSString *)urlString targetSize:(CGSize)targetSize {
-    NSURL *url = [NSURL URLWithString:urlString];
-    NSData *gifData = [NSData dataWithContentsOfURL:url];
+    NSData *gifData = [self fetchContentData:urlString];
 
     if (!gifData) {
         NSLog(@"Failed to download GIF from URL: %@", urlString);
@@ -1519,9 +1519,53 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
 
 #pragma mark - Image Download Helper
 
+// Ad content downloads give up after this long, so a slow network can't hold
+// up the ad cycle (ad requests are paused while content is being sent)
+static const NSTimeInterval kContentDownloadTimeout = 8.0;
+
+/**
+ * Download ad content synchronously (callers run on the module's queue, not main).
+ * Returns nil on network error, timeout, non-2xx status or empty body.
+ */
+- (NSData *)fetchContentData:(NSString *)urlString {
+    NSURL *url = urlString ? [NSURL URLWithString:urlString] : nil;
+    if (!url) {
+        NSLog(@"Invalid content URL: %@", urlString);
+        return nil;
+    }
+
+    if (!self.contentSession) {
+        NSURLSessionConfiguration *config = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+        config.timeoutIntervalForRequest = kContentDownloadTimeout;
+        config.timeoutIntervalForResource = kContentDownloadTimeout;
+        self.contentSession = [NSURLSession sessionWithConfiguration:config];
+    }
+
+    CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
+    __block NSData *result = nil;
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    NSURLSessionDataTask *task = [self.contentSession dataTaskWithURL:url
+                                                    completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]]
+            ? ((NSHTTPURLResponse *)response).statusCode
+            : 0;
+        if (!error && status >= 200 && status < 300 && data.length > 0) {
+            result = data;
+        } else {
+            NSLog(@"Content download failed: %@ (status %ld, error %@)", urlString, (long)status, error.localizedDescription);
+        }
+        dispatch_semaphore_signal(done);
+    }];
+    [task resume];
+    dispatch_semaphore_wait(done, DISPATCH_TIME_FOREVER);
+
+    NSLog(@"PERF|download|ok=%d|bytes=%lu|t_ms=%.0f", result != nil, (unsigned long)result.length,
+          (CFAbsoluteTimeGetCurrent() - start) * 1000.0);
+    return result;
+}
+
 - (UIImage *)downloadImageFromURL:(NSString *)urlString {
-    NSURL *url = [NSURL URLWithString:urlString];
-    NSData *imageData = [NSData dataWithContentsOfURL:url];
+    NSData *imageData = [self fetchContentData:urlString];
 
     if (imageData) {
         UIImage *image = [UIImage imageWithData:imageData];

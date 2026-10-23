@@ -14,6 +14,7 @@ import com.facebook.react.modules.core.DeviceEventManagerModule;
 import com.mobilldriversprotocol.models.*;
 
 import java.io.InputStream;
+import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -672,15 +673,59 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
      * Download image from URL
      */
     private Bitmap downloadImageFromURL(String urlString) {
-        try {
-            URL url = new URL(urlString);
-            InputStream input = url.openStream();
-            Bitmap bitmap = BitmapFactory.decodeStream(input);
-            input.close();
-            return bitmap;
-        } catch (Exception e) {
-            Log.e(TAG, "Error downloading image: " + e.getMessage(), e);
+        byte[] data = fetchContentData(urlString);
+        if (data == null) {
             return null;
+        }
+        return BitmapFactory.decodeByteArray(data, 0, data.length);
+    }
+
+    // Ad content downloads give up after this long, so a slow network can't hold
+    // up the ad cycle (ad requests are paused while content is being sent)
+    private static final int CONTENT_DOWNLOAD_TIMEOUT_MS = 8000;
+
+    /**
+     * Download ad content synchronously (callers run off the main thread).
+     * Returns null on network error, timeout, non-2xx status or empty body.
+     */
+    private byte[] fetchContentData(String urlString) {
+        long start = System.currentTimeMillis();
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(urlString).openConnection();
+            connection.setConnectTimeout(CONTENT_DOWNLOAD_TIMEOUT_MS);
+            connection.setReadTimeout(CONTENT_DOWNLOAD_TIMEOUT_MS);
+            int status = connection.getResponseCode();
+            if (status < 200 || status >= 300) {
+                Log.e(TAG, "Content download failed: " + urlString + " (status " + status + ")");
+                return null;
+            }
+
+            // Read in chunks so a slow trickle can't run far past the limit
+            InputStream input = connection.getInputStream();
+            java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+            byte[] chunk = new byte[16384];
+            int read;
+            while ((read = input.read(chunk)) != -1) {
+                if (System.currentTimeMillis() - start > CONTENT_DOWNLOAD_TIMEOUT_MS) {
+                    Log.e(TAG, "Content download timed out: " + urlString);
+                    input.close();
+                    return null;
+                }
+                buffer.write(chunk, 0, read);
+            }
+            input.close();
+
+            byte[] data = buffer.toByteArray();
+            Log.d(TAG, "PERF|download|ok=1|bytes=" + data.length + "|t_ms=" + (System.currentTimeMillis() - start));
+            return data.length > 0 ? data : null;
+        } catch (Exception e) {
+            Log.e(TAG, "Content download failed: " + urlString + " (" + e.getMessage() + ")");
+            return null;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
         }
     }
 
@@ -732,10 +777,7 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
             Log.d(TAG, "🎬 Extracting GIF frames from: " + gifUrl);
 
             // Download the GIF data
-            URL url = new URL(gifUrl);
-            InputStream inputStream = url.openStream();
-            byte[] gifData = readAllBytes(inputStream);
-            inputStream.close();
+            byte[] gifData = fetchContentData(gifUrl);
 
             if (gifData == null || gifData.length == 0) {
                 Log.e(TAG, "❌ Failed to download GIF data");
@@ -818,20 +860,6 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
             return Arrays.asList(scaleAndCropImage(singleFrame, width, height));
         }
         return new ArrayList<>();
-    }
-
-    /**
-     * Read all bytes from an InputStream
-     */
-    private byte[] readAllBytes(InputStream inputStream) throws Exception {
-        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
-        int nRead;
-        byte[] data = new byte[16384];
-        while ((nRead = inputStream.read(data, 0, data.length)) != -1) {
-            buffer.write(data, 0, nRead);
-        }
-        buffer.flush();
-        return buffer.toByteArray();
     }
 
     /**
