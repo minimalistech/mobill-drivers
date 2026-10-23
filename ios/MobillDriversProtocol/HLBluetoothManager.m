@@ -180,6 +180,15 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
     [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
+- (void)abortTransferOnModel:(GWPeripheral *)model
+{
+    [model abortTransfer];
+    if (self.pendingChunkPeripheral == model) {
+        self.pendingChunks = nil;
+        self.pendingChunkPeripheral = nil;
+    }
+}
+
 - (void)stopAutoReconnect
 {
     for (GWPeripheral *model in [self.reconnectingModels copy]) {
@@ -496,6 +505,7 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
                                           userInfo:@{NSLocalizedDescriptionKey: @"Bluetooth not powered on"}];
     for (GWPeripheral *model in [self.connectedModelsArray copy]) {
         [self.connectedModelsArray removeObject:model];
+        [self abortTransferOnModel:model];
         if (![self.userCancelledUUIDs containsObject:model.UUIDString] && ![self.reconnectingModels containsObject:model]) {
             [self.reconnectingModels addObject:model];
         }
@@ -700,6 +710,7 @@ typedef void(^PackageSendCompletion)(PackageSendCode code, NSString *msg);
             if (!wasConnected) {
                 continue;
             }
+            [self abortTransferOnModel:peripheralModel];
 
             if ([self.delegate respondsToSelector:@selector(didDisconnectPeripheral:error:)]) {
                 [self.delegate didDisconnectPeripheral:peripheralModel error:error];

@@ -129,4 +129,6 @@ typedef void(^SendCompletion)(BOOL success, NSString *msg);
 
 - (void)writeCommandModel:(HLPackageSendModel *)packageModel completion:(SendCompletion)completion;
 
+- (void)abortTransfer;
+
 @end

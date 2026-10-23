@@ -513,6 +513,18 @@
     [self sendPackageModel];
 }
 
+/// Drop any in-flight package transfer without reporting it, used when the link
+/// is lost so the 5s retry timer can't write stale packets into the next connection
+- (void)abortTransfer
+{
+    if (self.timerDelay) {
+        dispatch_source_cancel(self.timerDelay);
+        self.timerDelay = NULL;
+    }
+    _packageModel = nil;
+    _sendCompletion = nil;
+}
+
 - (void)sendPackageModel
 {
     if (!self.packageModel) {

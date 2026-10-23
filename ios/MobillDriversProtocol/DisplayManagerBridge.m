@@ -1437,6 +1437,14 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
     NSString *errorText = error
         ? [NSString stringWithFormat:@"%@ %ld: %@", error.domain, (long)error.code, error.localizedDescription]
         : @"";
+    // Settle an in-flight displayContent so JS doesn't wait on it forever
+    if (self.pendingReject) {
+        self.pendingReject(@"DISCONNECTED", @"Display disconnected during send", error);
+    }
+    self.pendingResolve = nil;
+    self.pendingReject = nil;
+    self.pendingAnimationModel = nil;
+
     [self sendEventWithName:@"onDeviceDisconnected" body:@{
         @"id": peripheral.UUIDString ?: @"",
         @"name": peripheral.name ?: @"",
