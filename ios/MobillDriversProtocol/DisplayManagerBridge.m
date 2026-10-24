@@ -163,41 +163,49 @@ RCT_EXPORT_METHOD(checkBluetoothState:(RCTPromiseResolveBlock)resolve
     });
 }
 
+// The scan, connect and disconnect methods run on the main queue: CoreBluetooth
+// delivers its callbacks there, and those callbacks mutate the same device arrays
+// (scanedModelsArray, reconnectingModels, discoveredDevices). Touching them from the
+// module queue raced with scan results and crashed with "mutated while enumerated".
 RCT_EXPORT_METHOD(startScan:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
-    NSLog(@"Starting scan with 5-second timeout");
-
-    // Clear any existing discovered devices and set scan as active
-    [self.discoveredDevices removeAllObjects];
-    self.isScanActive = YES;
-
-    // Initialize Bluetooth manager lazily and start scanning
-    [self ensureBluetoothManagerInitialized];
-    [self.bluetoothManager startDiscoverPeripheral];
-
-    // Set up 5-second timeout on main queue
-    [self invalidateScanTimer];
     dispatch_async(dispatch_get_main_queue(), ^{
+        NSLog(@"Starting scan with 5-second timeout");
+
+        // Clear any existing discovered devices and set scan as active
+        [self.discoveredDevices removeAllObjects];
+        self.isScanActive = YES;
+
+        // Initialize Bluetooth manager lazily and start scanning
+        [self ensureBluetoothManagerInitialized];
+        [self.bluetoothManager startDiscoverPeripheral];
+
+        // Replace any running timeout directly: invalidateScanTimer dispatches
+        // async, which from here would cancel the new timer instead
+        [self.scanTimeoutTimer invalidate];
         self.scanTimeoutTimer = [NSTimer scheduledTimerWithTimeInterval:5.0
                                                                  target:self
                                                                selector:@selector(onScanTimeout)
                                                                userInfo:nil
                                                                 repeats:NO];
         NSLog(@"Scan timer scheduled for 5 seconds on main queue");
+        resolve(@(YES));
     });
-    resolve(@(YES));
 }
 
 RCT_EXPORT_METHOD(stopScan:(RCTPromiseResolveBlock)resolve
                  rejecter:(RCTPromiseRejectBlock)reject)
 {
-    NSLog(@"Stopping scan manually");
-    self.isScanActive = NO;
-    [self invalidateScanTimer];
-    [self ensureBluetoothManagerInitialized];
-    [self.bluetoothManager.manager stopScan];
-    resolve(@(YES));
+    dispatch_async(dispatch_get_main_queue(), ^{
+        NSLog(@"Stopping scan manually");
+        self.isScanActive = NO;
+        [self.scanTimeoutTimer invalidate];
+        self.scanTimeoutTimer = nil;
+        [self ensureBluetoothManagerInitialized];
+        [self.bluetoothManager.manager stopScan];
+        resolve(@(YES));
+    });
 }
 
 #pragma mark - Continuous BLE Scanning for Impression Tracking
@@ -311,7 +319,15 @@ RCT_EXPORT_METHOD(connectToDevice:(NSString *)deviceId
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 {
-    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self connectToDeviceOnMain:deviceId resolver:resolve rejecter:reject];
+    });
+}
+
+- (void)connectToDeviceOnMain:(NSString *)deviceId
+                     resolver:(RCTPromiseResolveBlock)resolve
+                     rejecter:(RCTPromiseRejectBlock)reject
+{
     [self ensureBluetoothManagerInitialized];
 
     // Find the actual GWPeripheral object from scanedModelsArray that matches the deviceId
@@ -342,6 +358,15 @@ RCT_EXPORT_METHOD(connectToDevice:(NSString *)deviceId
 RCT_EXPORT_METHOD(disconnectDevice:(NSString *)deviceId
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+{
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self disconnectDeviceOnMain:deviceId resolver:resolve rejecter:reject];
+    });
+}
+
+- (void)disconnectDeviceOnMain:(NSString *)deviceId
+                      resolver:(RCTPromiseResolveBlock)resolve
+                      rejecter:(RCTPromiseRejectBlock)reject
 {
     [self ensureBluetoothManagerInitialized];
     GWPeripheral *peripheral = [self.bluetoothManager.connectedModelsArray firstObject];
@@ -1437,7 +1462,17 @@ RCT_EXPORT_METHOD(turnOffDisplay:(RCTPromiseResolveBlock)resolve
 
 #pragma mark - Device Connection Management
 
+// Called from displayContent on the module queue; the device arrays it reads are
+// mutated by CoreBluetooth callbacks on main, so do the check there
 - (BOOL)isDeviceConnected {
+    if (![NSThread isMainThread]) {
+        __block BOOL connected = NO;
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            connected = [self isDeviceConnected];
+        });
+        return connected;
+    }
+
     BOOL deviceConnected = NO;
 
     // First check our internal reference
