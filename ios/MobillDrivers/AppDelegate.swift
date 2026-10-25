@@ -1,5 +1,4 @@
 import UIKit
-import MachO
 import React
 import React_RCTAppDelegate
 import ReactAppDependencyProvider
@@ -15,8 +14,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
   ) -> Bool {
-    installExceptionRecorder()
-
     let delegate = ReactNativeDelegate()
     let factory = RCTReactNativeFactory(delegate: delegate)
     delegate.dependencyProvider = RCTAppDependencyProvider()
@@ -25,27 +22,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     reactNativeFactory = factory
 
     return true
-  }
-}
-
-// Crash logs from React Native method calls only show that an exception was rethrown;
-// the name, reason and throw site are lost. Record them before the process aborts.
-// Read with: xcrun devicectl device copy from --domain-type appDataContainer
-//   --domain-identifier com.mobill.drivers --source Documents/last_exception.txt
-private func installExceptionRecorder() {
-  NSSetUncaughtExceptionHandler { exception in
-    let header = String(format: "slide=0x%lx", _dyld_get_image_vmaddr_slide(0))
-    let lines = [
-      ISO8601DateFormatter().string(from: Date()),
-      "name=\(exception.name.rawValue)",
-      "reason=\(exception.reason ?? "nil")",
-      header,
-    ] + exception.callStackSymbols
-    let text = lines.joined(separator: "\n") + "\n"
-    NSLog("UNCAUGHT EXCEPTION\n%@", text)
-    if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-      try? text.write(to: dir.appendingPathComponent("last_exception.txt"), atomically: true, encoding: .utf8)
-    }
   }
 }
 
