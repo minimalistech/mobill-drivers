@@ -93,7 +93,14 @@ class BackgroundLocationServiceClass {
 
   private setupEventListeners(): void {
     // Location event - fired whenever a new location is recorded
+    // Location errors (e.g. a getCurrentPosition timeout) arrive on this same event.
+    // Without the failure callback the plugin passes the error to the success handler,
+    // which has no coords, and the TypeError crashes the app (fatal JS exception).
     BackgroundGeolocation.onLocation(location => {
+      if (!location || !location.coords) {
+        console.warn('🎯 Location event without coordinates:', location);
+        return;
+      }
       const newPosition: Coordinates = {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
@@ -124,6 +131,8 @@ class BackgroundLocationServiceClass {
       this.currentSpeed = location.coords.speed !== undefined && location.coords.speed >= 0
         ? location.coords.speed
         : null;
+    }, error => {
+      console.warn(`🎯 Location error: ${error}`);
     });
 
     // Motion and Activity events disabled to avoid Motion & Fitness permission requirement
