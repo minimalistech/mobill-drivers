@@ -17,6 +17,52 @@
 #import "JTTool.h"
 #import <ImageIO/ImageIO.h>
 #import <CoreBluetooth/CoreBluetooth.h>
+#import <objc/objc-exception.h>
+#import <mach-o/dyld.h>
+
+#pragma mark - Exception recording
+
+// React Native catches an NSException thrown by a module method and rethrows it as a
+// C++ error that terminates the app, so the crash log loses the exception's name,
+// reason and throw site, and NSSetUncaughtExceptionHandler never runs. Record every
+// Objective-C throw instead; the last entry before a crash is the cause.
+// Read with: xcrun devicectl device copy from --domain-type appDataContainer
+//   --domain-identifier com.mobill.drivers --source Documents/exceptions.log
+static objc_exception_preprocessor sPreviousExceptionPreprocessor = NULL;
+
+static id MBRecordThrownException(id exception) {
+    if ([exception isKindOfClass:[NSException class]]) {
+        NSException *e = (NSException *)exception;
+        NSString *entry = [NSString stringWithFormat:@"=== %@\nname=%@\nreason=%@\nthread=%@\nslide=0x%lx\n%@\n",
+                           [NSDate date], e.name, e.reason,
+                           [NSThread isMainThread] ? @"main" : (NSThread.currentThread.name ?: @"background"),
+                           (long)_dyld_get_image_vmaddr_slide(0),
+                           [[NSThread callStackSymbols] componentsJoinedByString:@"\n"]];
+        NSLog(@"OBJC EXCEPTION THROWN\n%@", entry);
+
+        NSString *dir = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
+        NSString *path = [dir stringByAppendingPathComponent:@"exceptions.log"];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        // Keep the file small: start over once it passes 200 KB
+        if ([[fm attributesOfItemAtPath:path error:nil] fileSize] > 200 * 1024) {
+            [fm removeItemAtPath:path error:nil];
+        }
+        if (![fm fileExistsAtPath:path]) {
+            [fm createFileAtPath:path contents:nil attributes:nil];
+        }
+        NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+        [handle seekToEndOfFile];
+        [handle writeData:[entry dataUsingEncoding:NSUTF8StringEncoding]];
+        [handle synchronizeFile];
+        [handle closeFile];
+    }
+    return sPreviousExceptionPreprocessor ? sPreviousExceptionPreprocessor(exception) : exception;
+}
+
+// Installed at image load, before any module code can throw
+__attribute__((constructor)) static void MBInstallExceptionRecorder(void) {
+    sPreviousExceptionPreprocessor = objc_setExceptionPreprocessor(MBRecordThrownException);
+}
 
 static NSString * const MOBILL_DRIVERS_VERSION = @"2.96";
 
