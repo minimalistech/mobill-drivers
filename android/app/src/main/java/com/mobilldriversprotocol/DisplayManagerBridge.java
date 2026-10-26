@@ -65,6 +65,11 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
     private List<WritableMap> bleDevicesInCurrentScan = new ArrayList<>();
     private Runnable continuousScanRunnable;
 
+    // Pairing scan timeout (like iOS onScanTimeout): tells JS no display was found
+    private static final int PAIRING_SCAN_TIMEOUT_MS = 10000;  // matches CoolLEDUBluetoothManager's scan stop
+    private volatile boolean isPairingScanActive = false;
+    private final Runnable pairingScanTimeoutRunnable = this::onPairingScanTimeout;
+
     // Transmission timeout watchdog
     private static final int TRANSMISSION_TIMEOUT_MS = 60000;  // 60 seconds timeout for large animations
     private Runnable transmissionTimeoutRunnable;
@@ -1594,16 +1599,39 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
         try {
             ensureBluetoothManagerInitialized();
             bluetoothManager.startScan();
+            isPairingScanActive = true;
+            mainHandler.removeCallbacks(pairingScanTimeoutRunnable);
+            mainHandler.postDelayed(pairingScanTimeoutRunnable, PAIRING_SCAN_TIMEOUT_MS);
             promise.resolve(true);
         } catch (Exception e) {
             promise.reject("SCAN_ERROR", e.getMessage());
         }
     }
 
+    /**
+     * No display found before the pairing scan ended. The native scan stops on its
+     * own, so without this event the JS side would stay in the searching state forever.
+     */
+    private void onPairingScanTimeout() {
+        if (!isPairingScanActive) {
+            return;
+        }
+        isPairingScanActive = false;
+        Log.d(TAG, "Pairing scan timeout - no display found");
+        if (bluetoothManager != null) {
+            bluetoothManager.stopScan();
+        }
+        WritableMap event = Arguments.createMap();
+        event.putArray("devices", Arguments.createArray());
+        sendEvent("onDeviceDiscovered", event);
+    }
+
     @ReactMethod
     public void stopScan(Promise promise) {
         try {
             ensureBluetoothManagerInitialized();
+            isPairingScanActive = false;
+            mainHandler.removeCallbacks(pairingScanTimeoutRunnable);
             bluetoothManager.stopScan();
             promise.resolve(true);
         } catch (Exception e) {
@@ -1905,6 +1933,10 @@ public class DisplayManagerBridge extends ReactContextBaseJavaModule {
             WritableMap event = Arguments.createMap();
             event.putArray("devices", devices);
 
+            if (isPairingScanActive) {
+                isPairingScanActive = false;
+                mainHandler.removeCallbacks(pairingScanTimeoutRunnable);
+            }
             sendEvent("onDeviceDiscovered", event);
 
             // Also add to continuous scan results if active
